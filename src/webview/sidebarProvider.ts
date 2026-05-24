@@ -1,22 +1,109 @@
 import * as vscode from 'vscode';
 import { LocalAgent } from '../agent/localAgent';
 
+type ChatEntryType = 'user' | 'assistant' | 'error';
+
+interface ChatEntry {
+    type: ChatEntryType;
+    text: string;
+    timestamp: number;
+}
+
+interface ModelMessage {
+    role: 'user' | 'assistant';
+    content: string;
+}
+
 export class SidebarProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'noriter-ai.chatView';
+    private static readonly historyStorageKey = 'noriter-ai.chatHistory';
+
     private _view?: vscode.WebviewView;
     private _agent: LocalAgent;
     private _cancellationTokenSource?: vscode.CancellationTokenSource;
+    private _history: ChatEntry[] = [];
+    private _maxHistoryEntries = 300;
+    private _maxContextMessages = 20;
 
-    constructor(private readonly _extensionUri: vscode.Uri) {
+    constructor(
+        private readonly _extensionUri: vscode.Uri,
+        private readonly _context: vscode.ExtensionContext
+    ) {
         this._agent = new LocalAgent();
+        this.loadSettings();
+        this.loadHistory();
+    }
+
+    private loadSettings() {
+        const config = vscode.workspace.getConfiguration('noriter-ai');
+        const configuredMax = config.get<number>('maxHistoryEntries', 300);
+        const configuredContextMax = config.get<number>('maxContextMessages', 20);
+        if (typeof configuredMax === 'number' && Number.isFinite(configuredMax) && configuredMax > 0) {
+            this._maxHistoryEntries = Math.floor(configuredMax);
+        }
+        if (typeof configuredContextMax === 'number' && Number.isFinite(configuredContextMax) && configuredContextMax > 0) {
+            this._maxContextMessages = Math.floor(configuredContextMax);
+        }
+    }
+
+    private loadHistory() {
+        const stored = this._context.workspaceState.get<ChatEntry[]>(SidebarProvider.historyStorageKey, []);
+        if (Array.isArray(stored)) {
+            this._history = stored
+                .filter(item => item && typeof item.text === 'string' && typeof item.type === 'string')
+                .map(item => ({
+                    type: item.type as ChatEntryType,
+                    text: item.text,
+                    timestamp: typeof item.timestamp === 'number' ? item.timestamp : Date.now()
+                }));
+            this.trimHistory();
+        }
+    }
+
+    private trimHistory() {
+        if (this._history.length > this._maxHistoryEntries) {
+            this._history = this._history.slice(this._history.length - this._maxHistoryEntries);
+        }
+    }
+
+    private async persistHistory() {
+        await this._context.workspaceState.update(SidebarProvider.historyStorageKey, this._history);
+    }
+
+    private async appendHistory(type: ChatEntryType, text: string) {
+        this._history.push({
+            type,
+            text,
+            timestamp: Date.now()
+        });
+        this.trimHistory();
+        await this.persistHistory();
+    }
+
+    private async clearHistory() {
+        this._history = [];
+        await this.persistHistory();
+    }
+
+    private buildModelContextMessages(): ModelMessage[] {
+        const conversationEntries = this._history.filter(
+            (entry): entry is ChatEntry & { type: 'user' | 'assistant' } => entry.type === 'user' || entry.type === 'assistant'
+        );
+        const sliced = conversationEntries.slice(Math.max(0, conversationEntries.length - this._maxContextMessages));
+        return sliced.map(entry => ({
+            role: entry.type,
+            content: entry.text
+        }));
     }
 
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
-        context: vscode.WebviewViewResolveContext,
+        _context: vscode.WebviewViewResolveContext,
         _token: vscode.CancellationToken
     ) {
         this._view = webviewView;
+        this.loadSettings();
+        this.loadHistory();
 
         webviewView.webview.options = {
             enableScripts: true,
@@ -29,8 +116,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.onDidReceiveMessage(async (data) => {
             switch (data.type) {
+                case 'webviewReady': {
+                    this._view?.webview.postMessage({ type: 'loadHistory', entries: this._history });
+                    break;
+                }
                 case 'sendMessage': {
                     this.startAgentSession(data.value);
+                    break;
+                }
+                case 'clearHistory': {
+                    await this.clearHistory();
+                    this._view?.webview.postMessage({ type: 'historyCleared' });
                     break;
                 }
                 case 'stopAgent': {
@@ -47,6 +143,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     private async startAgentSession(message: string) {
         if (!this._view) { return; }
+        this.loadSettings();
 
         if (this._cancellationTokenSource) {
             this._cancellationTokenSource.cancel();
@@ -55,7 +152,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
         this._cancellationTokenSource = new vscode.CancellationTokenSource();
         const token = this._cancellationTokenSource.token;
+        const contextMessages = this.buildModelContextMessages();
 
+        await this.appendHistory('user', message);
         this._view.webview.postMessage({ type: 'sessionStart', userPrompt: message });
 
         try {
@@ -72,19 +171,23 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         this._view?.webview.postMessage({ type: 'toolEnd', name: toolName, output: output });
                     },
                     onFinalAnswer: (text) => {
+                        void this.appendHistory('assistant', text);
                         this._view?.webview.postMessage({ type: 'finalAnswer', value: text });
                         this._cancellationTokenSource?.dispose();
                         this._cancellationTokenSource = undefined;
                     },
                     onError: (err) => {
+                        void this.appendHistory('error', err);
                         this._view?.webview.postMessage({ type: 'error', value: err });
                         this._cancellationTokenSource?.dispose();
                         this._cancellationTokenSource = undefined;
                     }
                 },
-                token
+                token,
+                contextMessages
             );
         } catch (e: any) {
+            void this.appendHistory('error', e.message);
             this._view?.webview.postMessage({ type: 'error', value: e.message });
             this._cancellationTokenSource?.dispose();
             this._cancellationTokenSource = undefined;
@@ -110,13 +213,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         <header class="chat-header">
             <h3>Noriter AI Agent</h3>
             <span class="status-indicator">Local Engine</span>
+            <button id="clear-history-btn" class="clear-btn" title="저장된 대화 삭제">기록 삭제</button>
         </header>
 
-        <div id="chat-messages" class="chat-messages">
-            <div class="system-message">
-                안녕하세요! 로컬 AI 에이전트 Noriter AI입니다. LM Studio 서버를 켜두시면 워크스페이스 내 파일 읽기/쓰기 및 터미널 명령어 실행을 통해 개발을 자동화할 수 있습니다.
-            </div>
-        </div>
+        <div id="chat-messages" class="chat-messages"></div>
 
         <div class="agent-activity-container" id="agent-activity" style="display: none;">
             <div class="spinner-container">

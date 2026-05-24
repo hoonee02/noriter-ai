@@ -10,6 +10,11 @@ export interface AgentProgress {
     onError: (error: string) => void;
 }
 
+interface AgentMessage {
+    role: 'user' | 'assistant';
+    content: string;
+}
+
 export class LocalAgent {
     private client: OpenAI | null = null;
     private modelName: string = 'local-model';
@@ -31,7 +36,12 @@ export class LocalAgent {
         });
     }
 
-    public async run(userMessage: string, progress: AgentProgress, token: vscode.CancellationToken): Promise<void> {
+    public async run(
+        userMessage: string,
+        progress: AgentProgress,
+        token: vscode.CancellationToken,
+        conversationContext: AgentMessage[] = []
+    ): Promise<void> {
         this.updateConfig(); // Refresh config values at launch
 
         if (!this.client) {
@@ -67,10 +77,13 @@ Final Answer: The package.json lists ...
 IMPORTANT: You can only call one tool at a time. Do not write "Observation:" yourself. You must write "Action:" and "Action Input:" and then STOP writing so the system can run the tool.
 `;
 
-        const messages: any[] = [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userMessage }
-        ];
+        const messages: any[] = [{ role: 'system', content: systemPrompt }];
+
+        for (const msg of conversationContext) {
+            messages.push({ role: msg.role, content: msg.content });
+        }
+
+        messages.push({ role: 'user', content: userMessage });
 
         let iteration = 0;
         while (iteration < this.maxIterations) {

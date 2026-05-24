@@ -35,6 +35,23 @@ body {
     font-weight: 600;
 }
 
+.clear-btn {
+    margin-left: auto;
+    margin-right: 8px;
+    background: transparent;
+    color: var(--vscode-descriptionForeground);
+    border: 1px solid var(--vscode-panel-border, rgba(255, 255, 255, 0.15));
+    border-radius: var(--border-radius);
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.clear-btn:hover {
+    color: var(--vscode-foreground);
+    border-color: var(--vscode-focusBorder);
+}
+
 .status-indicator {
     font-size: 10px;
     background: rgba(0, 255, 100, 0.15);

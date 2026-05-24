@@ -4,6 +4,7 @@
     const chatInput = document.getElementById('chat-input');
     const sendButton = document.getElementById('send-btn');
     const stopButton = document.getElementById('stop-btn');
+    const clearHistoryButton = document.getElementById('clear-history-btn');
     const agentActivity = document.getElementById('agent-activity');
     const agentStatusText = document.getElementById('agent-status-text');
 
@@ -24,6 +25,12 @@
         vscode.postMessage({ type: 'stopAgent' });
         showActivity(false);
     });
+
+    clearHistoryButton.addEventListener('click', () => {
+        vscode.postMessage({ type: 'clearHistory' });
+    });
+
+    vscode.postMessage({ type: 'webviewReady' });
 
     function sendMessage() {
         const text = chatInput.value.trim();
@@ -54,6 +61,48 @@
         scrollToBottom();
     }
 
+    function showSystemMessage() {
+        const systemDiv = document.createElement('div');
+        systemDiv.className = 'system-message';
+        systemDiv.textContent = '안녕하세요! 로컬 AI 에이전트 Noriter AI입니다. LM Studio 서버를 켜두시면 워크스페이스 내 파일 읽기/쓰기 및 터미널 명령어 실행을 통해 개발을 자동화할 수 있습니다.';
+        chatMessages.appendChild(systemDiv);
+    }
+
+    function renderHistory(entries) {
+        chatMessages.innerHTML = '';
+
+        if (!Array.isArray(entries) || entries.length === 0) {
+            showSystemMessage();
+            scrollToBottom();
+            return;
+        }
+
+        entries.forEach((entry) => {
+            if (!entry || typeof entry.text !== 'string') {
+                return;
+            }
+
+            if (entry.type === 'user') {
+                addMessage(entry.text, 'user');
+                return;
+            }
+
+            if (entry.type === 'assistant') {
+                addMessage(entry.text, 'assistant');
+                return;
+            }
+
+            if (entry.type === 'error') {
+                const errDiv = document.createElement('div');
+                errDiv.className = 'error-message';
+                errDiv.textContent = `⚠️ 오류: ${entry.text}`;
+                chatMessages.appendChild(errDiv);
+            }
+        });
+
+        scrollToBottom();
+    }
+
     function createLogBlock(title, initialContent = "") {
         const block = document.createElement('div');
         block.className = 'log-block collapsed';
@@ -78,9 +127,6 @@
         return {
             element: block,
             contentElement: content,
-            append: (text) => {
-                content.textContent += text;
-            },
             setContent: (text) => {
                 content.textContent = text;
             },
@@ -97,8 +143,15 @@
     window.addEventListener('message', event => {
         const message = event.data;
         switch (message.type) {
+            case 'loadHistory':
+                renderHistory(message.entries);
+                currentLogBlock = null;
+                break;
+            case 'historyCleared':
+                renderHistory([]);
+                currentLogBlock = null;
+                break;
             case 'sessionStart':
-                chatMessages.innerHTML = '';
                 addMessage(message.userPrompt, 'user');
                 showActivity(true, '에이전트가 생각하는 중...');
                 currentLogBlock = null;
