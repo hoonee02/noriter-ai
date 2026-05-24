@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { exec, ExecException } from 'child_process';
+import * as https from 'https';
 
 export interface Tool {
     name: string;
@@ -11,6 +12,17 @@ export interface Tool {
 
 interface MemoryStore {
     [key: string]: string;
+}
+
+interface TelegramConfig {
+    botToken: string;
+    chatId: string;
+}
+
+interface TelegramChatCandidate {
+    id: string;
+    type: string;
+    title: string;
 }
 
 export const MEMORY_RELATIVE_PATH = '.noriter-ai/agent-memory.md';
@@ -163,6 +175,202 @@ export function getGoalInstructions(workspaceRoot: string): string {
     }
 }
 
+export function updateGoalInstructions(workspaceRoot: string, goalText: string): string {
+    const goalPath = ensureGoalFile(workspaceRoot);
+    const normalized = goalText.trim();
+    const body = normalized
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+        .map(line => `- ${line}`)
+        .join('\n');
+
+    const content = [
+        '# Noriter AI Agent Goal',
+        '',
+        'Define the agent\'s objective for this workspace.',
+        'Everything in this file is injected into the agent system prompt at runtime.',
+        '',
+        '## Goal',
+        body || '- No custom goal set.',
+        ''
+    ].join('\n');
+
+    fs.writeFileSync(goalPath, content, 'utf8');
+    return goalPath;
+}
+
+function getTelegramConfig(): TelegramConfig {
+    const config = vscode.workspace.getConfiguration('noriter-ai');
+    return {
+        botToken: (config.get<string>('telegramBotToken') || '').trim(),
+        chatId: (config.get<string>('telegramChatId') || '').trim()
+    };
+}
+
+function normalizeChatId(rawChatId: string): string {
+    const trimmed = rawChatId.trim();
+    const numericMatch = trimmed.match(/-?\d{5,}/);
+    return numericMatch ? numericMatch[0] : trimmed;
+}
+
+export async function sendTelegramMessageWithConfig(botToken: string, chatId: string, text: string): Promise<string> {
+    const normalizedChatId = normalizeChatId(chatId);
+
+    return new Promise((resolve) => {
+        const payload = new URLSearchParams({
+            chat_id: normalizedChatId,
+            text
+        }).toString();
+
+        const request = https.request(
+            {
+                hostname: 'api.telegram.org',
+                path: `/bot${botToken}/sendMessage`,
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Content-Length': Buffer.byteLength(payload)
+                }
+            },
+            (response) => {
+                let body = '';
+                response.on('data', (chunk) => {
+                    body += chunk.toString();
+                });
+                response.on('end', () => {
+                    if ((response.statusCode || 500) >= 400) {
+                        try {
+                            const parsed = JSON.parse(body) as { description?: string };
+                            const description = parsed.description || '';
+                            if (description.toLowerCase().includes('chat not found')) {
+                                void findTelegramChatCandidates(botToken).then((candidates) => {
+                                    resolve(
+                                        `Telegram API Error (${response.statusCode}): ${body}\n\n` +
+                                        `Tip: Use only pure chat ID (numbers only) in noriter-ai.telegramChatId.\n` +
+                                        `Input chat ID: "${chatId}"\n` +
+                                        `Normalized chat ID: "${normalizedChatId}"\n\n` +
+                                        `${candidates}`
+                                    );
+                                });
+                                return;
+                            }
+                        } catch {
+                            // Fall back to generic error below.
+                        }
+
+                        resolve(`Telegram API Error (${response.statusCode}): ${body}`);
+                        return;
+                    }
+
+                    try {
+                        const parsed = JSON.parse(body) as { ok?: boolean; description?: string };
+                        if (!parsed.ok) {
+                            resolve(`Telegram API Error: ${parsed.description || 'Unknown error'}`);
+                            return;
+                        }
+                        resolve('Telegram message sent successfully.');
+                    } catch {
+                        resolve('Telegram message sent successfully.');
+                    }
+                });
+            }
+        );
+
+        request.on('error', (error) => {
+            resolve(`Telegram request failed: ${error.message}`);
+        });
+
+        request.write(payload);
+        request.end();
+    });
+}
+
+export async function findTelegramChatCandidates(botToken: string): Promise<string> {
+    if (!botToken.trim()) {
+        return 'Please provide bot token first.';
+    }
+
+    return new Promise((resolve) => {
+        const request = https.request(
+            {
+                hostname: 'api.telegram.org',
+                path: `/bot${botToken}/getUpdates`,
+                method: 'GET'
+            },
+            (response) => {
+                let body = '';
+                response.on('data', (chunk) => {
+                    body += chunk.toString();
+                });
+                response.on('end', () => {
+                    if ((response.statusCode || 500) >= 400) {
+                        resolve(`Telegram API Error (${response.statusCode}): ${body}`);
+                        return;
+                    }
+
+                    try {
+                        const parsed = JSON.parse(body) as {
+                            ok?: boolean;
+                            description?: string;
+                            result?: Array<{
+                                message?: { chat?: { id?: number | string; type?: string; title?: string; username?: string; first_name?: string; last_name?: string } };
+                                channel_post?: { chat?: { id?: number | string; type?: string; title?: string; username?: string; first_name?: string; last_name?: string } };
+                            }>;
+                        };
+
+                        if (!parsed.ok) {
+                            resolve(`Telegram API Error: ${parsed.description || 'Unknown error'}`);
+                            return;
+                        }
+
+                        const candidatesMap = new Map<string, TelegramChatCandidate>();
+                        const updates = parsed.result || [];
+
+                        for (const update of updates) {
+                            const chat = update.message?.chat || update.channel_post?.chat;
+                            if (!chat || chat.id === undefined || chat.id === null) {
+                                continue;
+                            }
+
+                            const id = String(chat.id);
+                            const type = chat.type || 'unknown';
+                            const title = chat.title || chat.username || [chat.first_name, chat.last_name].filter(Boolean).join(' ') || 'Unnamed chat';
+                            candidatesMap.set(id, { id, type, title });
+                        }
+
+                        const candidates = Array.from(candidatesMap.values()).sort((a, b) => a.id.localeCompare(b.id));
+                        if (candidates.length === 0) {
+                            resolve('No chat candidates found. Send a message to your bot first (or add it to a group/channel), then try again.');
+                            return;
+                        }
+
+                        const lines = candidates.map((c) => `- ${c.id} [${c.type}] ${c.title}`);
+                        resolve(`Found chat candidates:\n${lines.join('\n')}`);
+                    } catch (error: any) {
+                        resolve(`Failed to parse getUpdates response: ${error.message}`);
+                    }
+                });
+            }
+        );
+
+        request.on('error', (error) => {
+            resolve(`Telegram request failed: ${error.message}`);
+        });
+
+        request.end();
+    });
+}
+
+export async function sendTelegramMessageFromSettings(text: string): Promise<string> {
+    const { botToken, chatId } = getTelegramConfig();
+    if (!botToken || !chatId) {
+        return 'Telegram is not configured. Please set noriter-ai.telegramBotToken and noriter-ai.telegramChatId.';
+    }
+
+    return sendTelegramMessageWithConfig(botToken, chatId, text);
+}
+
 function loadMemoryStore(workspaceRoot: string): MemoryStore {
     const memoryPath = ensureMemoryFile(workspaceRoot);
 
@@ -242,6 +450,11 @@ export const TOOLS: Tool[] = [
         name: "deleteMemory",
         description: "Delete a memory entry by key.",
         parameters: "{ \"key\": \"preferred-language\" }"
+    },
+    {
+        name: "sendTelegramMessage",
+        description: "Send a message to a configured Telegram bot chat.",
+        parameters: "{ \"text\": \"Build completed successfully\" }"
     }
 ];
 
@@ -375,6 +588,14 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
             delete memory[key];
             saveMemoryStore(workspaceRoot, memory);
             return `Memory deleted: ${key}`;
+        }
+        case "sendTelegramMessage": {
+            const text = typeof args.text === 'string' ? args.text.trim() : '';
+            if (!text) {
+                return "Error: Missing 'text' parameter.";
+            }
+
+            return sendTelegramMessageFromSettings(text);
         }
         default:
             return `Error: Tool '${toolName}' not found.`;

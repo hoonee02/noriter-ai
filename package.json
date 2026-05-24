@@ -7,10 +7,13 @@
     "type": "git",
     "url": "https://github.com/connectai/noriter-ai.git"
   },
-  "version": "0.0.4",
+  "version": "0.0.5",
   "engines": {
     "vscode": "^1.80.0"
   },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "categories": [
     "AI",
     "Programming Languages"
@@ -65,6 +68,21 @@
           "default": 20,
           "minimum": 2,
           "description": "How many recent saved user/assistant messages are sent to LM Studio as context."
+        },
+        "noriter-ai.telegramBotToken": {
+          "type": "string",
+          "default": "",
+          "description": "Telegram bot token used for sending messages (from @BotFather)."
+        },
+        "noriter-ai.telegramChatId": {
+          "type": "string",
+          "default": "",
+          "description": "Telegram chat ID where the bot should send messages."
+        },
+        "noriter-ai.telegramEnableChatBridge": {
+          "type": "boolean",
+          "default": false,
+          "description": "When enabled, messages from the configured Telegram chat are processed by the local AI agent and replied back."
         }
       }
     }

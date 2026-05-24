@@ -6,6 +6,7 @@
     const stopButton = document.getElementById('stop-btn');
     const openGoalButton = document.getElementById('open-goal-btn');
     const openMemoryButton = document.getElementById('open-memory-btn');
+    const telegramTestButton = document.getElementById('telegram-test-btn');
     const clearHistoryButton = document.getElementById('clear-history-btn');
     const agentActivity = document.getElementById('agent-activity');
     const agentStatusText = document.getElementById('agent-status-text');
@@ -38,6 +39,10 @@
 
     openGoalButton.addEventListener('click', () => {
         vscode.postMessage({ type: 'openGoal' });
+    });
+
+    telegramTestButton.addEventListener('click', () => {
+        vscode.postMessage({ type: 'openTelegramSettings' });
     });
 
     vscode.postMessage({ type: 'webviewReady' });

@@ -68,6 +68,22 @@ body {
     border-color: var(--vscode-focusBorder);
 }
 
+.telegram-btn {
+    margin-right: 8px;
+    background: transparent;
+    color: var(--vscode-descriptionForeground);
+    border: 1px solid var(--vscode-panel-border, rgba(255, 255, 255, 0.15));
+    border-radius: var(--border-radius);
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.telegram-btn:hover {
+    color: var(--vscode-foreground);
+    border-color: var(--vscode-focusBorder);
+}
+
 .clear-btn {
     margin-right: 8px;
     background: transparent;

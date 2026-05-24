@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { LocalAgent } from '../agent/localAgent';
 import { ensureMemoryFile, ensureGoalFile } from '../agent/tools';
+import { TelegramSettingsPanel } from './telegramSettingsPanel';
 
 type ChatEntryType = 'user' | 'assistant' | 'error';
 
@@ -138,6 +139,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     await this.openGoalFile();
                     break;
                 }
+                case 'openTelegramSettings': {
+                    this.openTelegramIntegrationWindow();
+                    break;
+                }
                 case 'stopAgent': {
                     if (this._cancellationTokenSource) {
                         this._cancellationTokenSource.cancel();
@@ -243,6 +248,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    private openTelegramIntegrationWindow() {
+        TelegramSettingsPanel.createOrShow(this._extensionUri);
+    }
+
     private _getHtmlForWebview(webview: vscode.Webview) {
         const styleMainUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'main.css'));
         const scriptMainUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'main.js'));
@@ -264,6 +273,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             <span class="status-indicator">Local Engine</span>
             <button id="open-goal-btn" class="goal-btn" title="에이전트 목표 파일 열기">목표</button>
             <button id="open-memory-btn" class="memory-btn" title="메모리 파일 열기">메모리</button>
+            <button id="telegram-test-btn" class="telegram-btn" title="텔레그램 연동 창 열기">텔레그램</button>
             <button id="clear-history-btn" class="clear-btn" title="저장된 대화 삭제">기록 삭제</button>
         </header>
 
