@@ -8,3 +8,6 @@ Local AI Agent inside VSCode powered by LM Studio.
 - Theme-responsive design with collapsible agent thoughts.
 - Conversation history is persisted per workspace and restored on reopen.
 - Recent conversation turns are automatically sent back to LM Studio as context for follow-up prompts.
+- Agent memory space is persisted in workspace at `.noriter-ai/agent-memory.md` and can be managed with memory tools (`saveMemory`, `getMemory`, `listMemoryKeys`, `deleteMemory`).
+- A "메모리" button in the extension sidebar opens the memory markdown file for direct user editing and review.
+- A "목표" button opens `.noriter-ai/agent-goal.md`, and its content is injected into the agent system prompt so users can directly control the agent's objective.

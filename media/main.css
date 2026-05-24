@@ -35,8 +35,40 @@ body {
     font-weight: 600;
 }
 
-.clear-btn {
+.goal-btn {
     margin-left: auto;
+    margin-right: 8px;
+    background: transparent;
+    color: var(--vscode-descriptionForeground);
+    border: 1px solid var(--vscode-panel-border, rgba(255, 255, 255, 0.15));
+    border-radius: var(--border-radius);
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.goal-btn:hover {
+    color: var(--vscode-foreground);
+    border-color: var(--vscode-focusBorder);
+}
+
+.memory-btn {
+    margin-right: 8px;
+    background: transparent;
+    color: var(--vscode-descriptionForeground);
+    border: 1px solid var(--vscode-panel-border, rgba(255, 255, 255, 0.15));
+    border-radius: var(--border-radius);
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.memory-btn:hover {
+    color: var(--vscode-foreground);
+    border-color: var(--vscode-focusBorder);
+}
+
+.clear-btn {
     margin-right: 8px;
     background: transparent;
     color: var(--vscode-descriptionForeground);

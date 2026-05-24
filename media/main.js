@@ -4,6 +4,8 @@
     const chatInput = document.getElementById('chat-input');
     const sendButton = document.getElementById('send-btn');
     const stopButton = document.getElementById('stop-btn');
+    const openGoalButton = document.getElementById('open-goal-btn');
+    const openMemoryButton = document.getElementById('open-memory-btn');
     const clearHistoryButton = document.getElementById('clear-history-btn');
     const agentActivity = document.getElementById('agent-activity');
     const agentStatusText = document.getElementById('agent-status-text');
@@ -28,6 +30,14 @@
 
     clearHistoryButton.addEventListener('click', () => {
         vscode.postMessage({ type: 'clearHistory' });
+    });
+
+    openMemoryButton.addEventListener('click', () => {
+        vscode.postMessage({ type: 'openMemory' });
+    });
+
+    openGoalButton.addEventListener('click', () => {
+        vscode.postMessage({ type: 'openGoal' });
     });
 
     vscode.postMessage({ type: 'webviewReady' });

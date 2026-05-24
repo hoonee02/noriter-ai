@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { LocalAgent } from '../agent/localAgent';
+import { ensureMemoryFile, ensureGoalFile } from '../agent/tools';
 
 type ChatEntryType = 'user' | 'assistant' | 'error';
 
@@ -129,6 +130,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     this._view?.webview.postMessage({ type: 'historyCleared' });
                     break;
                 }
+                case 'openMemory': {
+                    await this.openMemoryFile();
+                    break;
+                }
+                case 'openGoal': {
+                    await this.openGoalFile();
+                    break;
+                }
                 case 'stopAgent': {
                     if (this._cancellationTokenSource) {
                         this._cancellationTokenSource.cancel();
@@ -194,6 +203,46 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    private async openMemoryFile() {
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (!workspaceFolders || workspaceFolders.length === 0) {
+            void vscode.window.showErrorMessage('No workspace folder open.');
+            return;
+        }
+
+        const workspaceRoot = workspaceFolders[0].uri.fsPath;
+
+        try {
+            const memoryPath = ensureMemoryFile(workspaceRoot);
+            const memoryUri = vscode.Uri.file(memoryPath);
+
+            const doc = await vscode.workspace.openTextDocument(memoryUri);
+            await vscode.window.showTextDocument(doc, { preview: false });
+        } catch (error: any) {
+            void vscode.window.showErrorMessage(`Failed to open memory file: ${error.message}`);
+        }
+    }
+
+    private async openGoalFile() {
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (!workspaceFolders || workspaceFolders.length === 0) {
+            void vscode.window.showErrorMessage('No workspace folder open.');
+            return;
+        }
+
+        const workspaceRoot = workspaceFolders[0].uri.fsPath;
+
+        try {
+            const goalPath = ensureGoalFile(workspaceRoot);
+            const goalUri = vscode.Uri.file(goalPath);
+
+            const doc = await vscode.workspace.openTextDocument(goalUri);
+            await vscode.window.showTextDocument(doc, { preview: false });
+        } catch (error: any) {
+            void vscode.window.showErrorMessage(`Failed to open goal file: ${error.message}`);
+        }
+    }
+
     private _getHtmlForWebview(webview: vscode.Webview) {
         const styleMainUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'main.css'));
         const scriptMainUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'main.js'));
@@ -213,6 +262,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         <header class="chat-header">
             <h3>Noriter AI Agent</h3>
             <span class="status-indicator">Local Engine</span>
+            <button id="open-goal-btn" class="goal-btn" title="에이전트 목표 파일 열기">목표</button>
+            <button id="open-memory-btn" class="memory-btn" title="메모리 파일 열기">메모리</button>
             <button id="clear-history-btn" class="clear-btn" title="저장된 대화 삭제">기록 삭제</button>
         </header>
 

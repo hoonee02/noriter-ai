@@ -1,6 +1,6 @@
 import { OpenAI } from 'openai';
 import * as vscode from 'vscode';
-import { TOOLS, executeTool } from './tools';
+import { TOOLS, executeTool, getMemorySummary, getGoalInstructions } from './tools';
 
 export interface AgentProgress {
     onThought: (text: string) => void;
@@ -49,16 +49,34 @@ export class LocalAgent {
             return;
         }
 
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (!workspaceFolders || workspaceFolders.length === 0) {
+            progress.onError('No workspace folder open.');
+            return;
+        }
+        const workspaceRoot = workspaceFolders[0].uri.fsPath;
+
         const toolsDesc = TOOLS.map(t => `- ${t.name}: ${t.description}. Params: ${t.parameters}`).join('\n');
+        const toolNames = TOOLS.map(t => t.name).join(', ');
+        const memorySummary = getMemorySummary(workspaceRoot);
+        const goalInstructions = getGoalInstructions(workspaceRoot);
 
         const systemPrompt = `You are an AI Agent operating inside a VSCode workspace.
 You have access to the following tools to interact with the codebase:
 ${toolsDesc}
 
+Persistent Memory Snapshot:
+${memorySummary}
+
+Custom Goal Instructions (from .noriter-ai/agent-goal.md):
+${goalInstructions}
+
+Use saveMemory for facts that should persist across tasks, and use getMemory/listMemoryKeys before asking for details that may already be known.
+
 To complete the user's task, you must output step-by-step using this exact ReAct format:
 
 Thought: Describe your reasoning for the current step.
-Action: The name of the tool to execute. Must be one of: [getWorkspaceFiles, readFile, writeFile, runTerminalCommand]
+Action: The name of the tool to execute. Must be one of: [${toolNames}]
 Action Input: The arguments for the tool in JSON format. Ensure all quotes are valid.
 Observation: [The system will provide the tool output here. DO NOT write this line yourself. Stop outputting after Action Input.]
 
