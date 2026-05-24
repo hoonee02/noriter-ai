@@ -1,0 +1,12 @@
+# Dependencies
+node_modules/
+
+# Compiled files
+dist/
+
+# Package files
+*.vsix
+
+# VS Code test outputs
+.vscode-test/
+.history/

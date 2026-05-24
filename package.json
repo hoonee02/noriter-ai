@@ -1,0 +1,70 @@
+{
+  "name": "noriter-ai",
+  "displayName": "Noriter AI",
+  "description": "Local AI Agent inside VSCode powered by LM Studio",
+  "publisher": "connectai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/connectai/noriter-ai.git"
+  },
+  "version": "0.0.2",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "activationEvents": [
+    "onView:noriter-ai.chatView"
+  ],
+  "categories": [
+    "AI",
+    "Programming"
+  ],
+  "main": "./dist/extension.js",
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "noriter-ai-sidebar",
+          "title": "Noriter AI",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "noriter-ai-sidebar": [
+        {
+          "type": "webview",
+          "id": "noriter-ai.chatView",
+          "name": "Local Agent Chat"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Noriter AI",
+      "properties": {
+        "noriter-ai.lmStudioEndpoint": {
+          "type": "string",
+          "default": "http://localhost:1234/v1",
+          "description": "LM Studio Local Server API Endpoint URL"
+        },
+        "noriter-ai.modelName": {
+          "type": "string",
+          "default": "local-model",
+          "description": "The identifier of the model loaded in LM Studio"
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0",
+    "@types/node": "^18.0.0",
+    "typescript": "^5.1.3"
+  },
+  "dependencies": {
+    "openai": "^4.20.0"
+  }
+}
