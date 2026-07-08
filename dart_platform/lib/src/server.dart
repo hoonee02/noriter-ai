@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -9,44 +9,47 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'package:noriter_ai_desktop/src/assets.dart';
 import 'package:noriter_ai_desktop/src/config.dart';
+import 'package:noriter_ai_desktop/src/engine_state.dart';
 import 'package:noriter_ai_desktop/src/history_service.dart';
+import 'package:noriter_ai_desktop/src/llama_engine_manager.dart';
 import 'package:noriter_ai_desktop/src/local_agent.dart';
 import 'package:noriter_ai_desktop/src/memory_service.dart';
 import 'package:noriter_ai_desktop/src/goal_service.dart';
+import 'package:noriter_ai_desktop/src/model_download_service.dart';
 import 'package:noriter_ai_desktop/src/model_provider.dart';
 
 class NoriterServer {
-  NoriterServer({required this.config});
+  NoriterServer({required this.config, required this.engineManager});
 
   final AppConfig config;
+  final LlamaEngineManager engineManager;
+
   late final HistoryService _history;
   late final MemoryService _memory;
   late final GoalService _goal;
-  late final LocalAgent _agent;
-  late final OpenAiCompatibleModelProvider _provider;
+  late LocalAgent _agent;
+  late OpenAiCompatibleModelProvider _provider;
 
-  // Active WebSocket sinks for broadcasting
   final Set<WebSocketChannel> _clients = {};
-
-  // Cancellation: a completer that can be replaced each run
   bool _cancelled = false;
+
+  // Live endpoint (may change when embedded engine starts)
+  late String _activeEndpoint;
+
+  final EngineState _engineState = EngineState();
 
   Future<void> start() async {
     _history = HistoryService(workspaceRoot: config.workspacePath);
     _memory = MemoryService(workspaceRoot: config.workspacePath);
     _goal = GoalService(workspaceRoot: config.workspacePath);
-    _provider = OpenAiCompatibleModelProvider(
-      endpoint: config.modelEndpoint,
-      apiKey: config.apiKey,
-    );
-    _agent = LocalAgent(
-      endpoint: config.modelEndpoint,
-      apiKey: config.apiKey,
-      modelName: config.modelName,
-      workspaceRoot: config.workspacePath,
-      memoryService: _memory,
-      goalService: _goal,
-    );
+
+    _activeEndpoint = config.engineMode == EngineMode.embedded
+        ? 'http://127.0.0.1:8080/v1'
+        : config.modelEndpoint;
+
+    _engineState.mode = config.engineMode;
+
+    _rebuildAgent();
 
     await _history.load();
     _goal.ensureGoalFile();
@@ -57,6 +60,21 @@ class NoriterServer {
 
     final server = await shelf_io.serve(handler, 'localhost', config.port);
     stdout.writeln('Noriter AI server running at http://localhost:${server.port}');
+  }
+
+  void _rebuildAgent() {
+    _provider = OpenAiCompatibleModelProvider(
+      endpoint: _activeEndpoint,
+      apiKey: config.apiKey,
+    );
+    _agent = LocalAgent(
+      endpoint: _activeEndpoint,
+      apiKey: config.apiKey,
+      modelName: config.modelName,
+      workspaceRoot: config.workspacePath,
+      memoryService: _memory,
+      goalService: _goal,
+    );
   }
 
   Middleware _corsMiddleware() {
@@ -100,10 +118,19 @@ class NoriterServer {
   void _handleWebSocket(WebSocketChannel channel) {
     _clients.add(channel);
 
-    // Send current history on connect
     _sendTo(channel, {
       'type': 'loadHistory',
       'entries': _history.getEntries(),
+    });
+
+    // Send engine state immediately on connect
+    _sendTo(channel, {
+      'type': 'engineStatus',
+      'state': _engineState.toJson(),
+      'isInstalled': engineManager.isInstalled,
+      'localModels': engineManager.listLocalModels(),
+      'recommendedModels': ModelDownloadService.recommendedModels,
+      'activeModelPath': engineManager.activeModelPath,
     });
 
     channel.stream.listen(
@@ -123,9 +150,14 @@ class NoriterServer {
   Future<void> _handleMessage(WebSocketChannel channel, Map<String, dynamic> msg) async {
     switch (msg['type'] as String?) {
       case 'webviewReady':
+        _sendTo(channel, {'type': 'loadHistory', 'entries': _history.getEntries()});
         _sendTo(channel, {
-          'type': 'loadHistory',
-          'entries': _history.getEntries(),
+          'type': 'engineStatus',
+          'state': _engineState.toJson(),
+          'isInstalled': engineManager.isInstalled,
+          'localModels': engineManager.listLocalModels(),
+          'recommendedModels': ModelDownloadService.recommendedModels,
+          'activeModelPath': engineManager.activeModelPath,
         });
         break;
 
@@ -147,9 +179,123 @@ class NoriterServer {
 
       case 'openMemory':
       case 'openGoal':
-        // No-op: handled in JS with alert
+        break;
+
+      case 'getEngineStatus':
+        _sendTo(channel, {
+          'type': 'engineStatus',
+          'state': _engineState.toJson(),
+          'isInstalled': engineManager.isInstalled,
+          'localModels': engineManager.listLocalModels(),
+          'recommendedModels': ModelDownloadService.recommendedModels,
+          'activeModelPath': engineManager.activeModelPath,
+        });
+        break;
+
+      case 'downloadEngine':
+        _engineState.status = EngineStatus.downloadingEngine;
+        _broadcastEngineStatus();
+        unawaited(_runDownloadEngine());
+        break;
+
+      case 'listLocalModels':
+        _sendTo(channel, {
+          'type': 'localModelsList',
+          'models': engineManager.listLocalModels(),
+        });
+        break;
+
+      case 'startEngine':
+        final modelPath = msg['modelPath'] as String?;
+        if (modelPath != null && modelPath.isNotEmpty) {
+          unawaited(_runStartEngine(modelPath));
+        }
+        break;
+
+      case 'downloadModel':
+        final url = msg['url'] as String?;
+        final filename = msg['filename'] as String?;
+        if (url != null && url.isNotEmpty) {
+          unawaited(_runDownloadModel(url, filename));
+        }
         break;
     }
+  }
+
+  Future<void> _runDownloadEngine() async {
+    try {
+      await engineManager.downloadEngine(onStatus: (status) {
+        _engineState.statusMessage = status;
+        _broadcastEngineStatus();
+      });
+      _engineState.status = EngineStatus.idle;
+      _engineState.statusMessage = 'Engine installed! Download a model and click Run.';
+    } catch (e) {
+      _engineState.status = EngineStatus.error;
+      _engineState.statusMessage = 'Engine download failed: $e';
+    }
+    _broadcastEngineStatus();
+  }
+
+  Future<void> _runStartEngine(String modelPath) async {
+    _engineState.status = EngineStatus.starting;
+    _engineState.statusMessage = 'Starting engine...';
+    _engineState.activeModelPath = modelPath;
+    _broadcastEngineStatus();
+    try {
+      await engineManager.startServer(modelPath);
+      _activeEndpoint = 'http://127.0.0.1:${engineManager.activePort}/v1';
+      _rebuildAgent();
+      _engineState.status = EngineStatus.ready;
+      _engineState.serverPort = engineManager.activePort;
+      _engineState.statusMessage = 'Engine ready! Start chatting.';
+    } catch (e) {
+      _engineState.status = EngineStatus.error;
+      _engineState.statusMessage = 'Engine start failed: $e';
+    }
+    _broadcastEngineStatus();
+  }
+
+  Future<void> _runDownloadModel(String url, String? filename) async {
+    _engineState.status = EngineStatus.downloadingModel;
+    _engineState.statusMessage = 'Model download starting...';
+    _broadcastEngineStatus();
+    try {
+      final svc = ModelDownloadService(modelsDir: engineManager.modelsDir);
+      await svc.downloadModel(
+        url,
+        saveName: filename,
+        onProgress: (received, total) {
+          final mb = (received / 1024 / 1024).toStringAsFixed(1);
+          final totalMb = total > 0 ? (total / 1024 / 1024).toStringAsFixed(1) : '?';
+          final pct = total > 0 ? '${received * 100 ~/ total}%' : '';
+          _engineState.statusMessage = 'Downloading... $mb MB / $totalMb MB $pct';
+          _broadcastEngineStatus();
+        },
+      );
+      _engineState.status = EngineStatus.idle;
+      _engineState.statusMessage = 'Model download complete!';
+    } catch (e) {
+      _engineState.status = EngineStatus.error;
+      _engineState.statusMessage = 'Model download failed: $e';
+    }
+    _broadcastEngineStatus();
+    // Refresh model list after download
+    _broadcast({
+      'type': 'localModelsList',
+      'models': engineManager.listLocalModels(),
+    });
+  }
+
+  void _broadcastEngineStatus() {
+    _broadcast({
+      'type': 'engineStatus',
+      'state': _engineState.toJson(),
+      'isInstalled': engineManager.isInstalled,
+      'localModels': engineManager.listLocalModels(),
+      'recommendedModels': ModelDownloadService.recommendedModels,
+      'activeModelPath': engineManager.activeModelPath,
+    });
   }
 
   Future<void> _handleSendMessage(String message) async {
@@ -159,15 +305,38 @@ class NoriterServer {
       try {
         final models = await _provider.listModels();
         final response = models.isEmpty
-            ? '사용 가능한 모델을 찾지 못했습니다. 모델 엔진 상태(LM Studio 또는 OpenAI-compatible endpoint)를 확인하세요.'
-            : ['사용 가능한 모델 목록:', ...models.map((m) => '- $m')].join('\n');
+            ? 'No models found. Install a model from the Engine panel.'
+            : ['Available models:', ...models.map((m) => '- $m')].join('\n');
         await _history.append('assistant', response);
         _broadcast({'type': 'finalAnswer', 'value': response});
       } catch (e) {
-        final err = '모델 목록 조회 실패: $e';
+        final err = 'Model list query failed: $e';
         await _history.append('error', err);
         _broadcast({'type': 'error', 'value': err});
       }
+      return;
+    }
+
+    if (message.toLowerCase() == '/engine') {
+      await _history.append('user', message);
+      _broadcast({'type': 'sessionStart', 'userPrompt': message});
+      final installed = engineManager.isInstalled ? '[installed]' : '[not installed]';
+      final activeModel = engineManager.activeModelPath ?? 'none';
+      final status = _engineState.status.name;
+      final models = engineManager.listLocalModels();
+      final modelLines = models.isEmpty ? ['  (none)'] : models.map((m) => '  - $m').toList();
+      final response = [
+        '[Engine Status]',
+        '- llama-server: $installed',
+        '- Status: $status',
+        '- Active model: $activeModel',
+        '- Local models:',
+        ...modelLines,
+        '',
+        'Use the [Engine] button in the header to download and start a model.',
+      ].join('\n');
+      await _history.append('assistant', response);
+      _broadcast({'type': 'finalAnswer', 'value': response});
       return;
     }
 
@@ -220,3 +389,10 @@ class NoriterServer {
     }
   }
 }
+
+void unawaited(Future<void> future) {
+  future.catchError((Object e) {
+    stderr.writeln('Unhandled background error: $e');
+  });
+}
+

@@ -1,4 +1,4 @@
-// Embedded static assets for standalone EXE deployment.
+﻿// Embedded static assets for standalone EXE deployment.
 // HTML/CSS/JS are inlined here so dart compile exe produces a single binary.
 
 const String kChatHtml = r'''<!DOCTYPE html>
@@ -35,24 +35,43 @@ const String kChatHtml = r'''<!DOCTYPE html>
         <header class="chat-header">
             <h3>Noriter AI Agent</h3>
             <span class="status-indicator">Local Engine</span>
-            <button id="open-goal-btn" class="goal-btn" title="에이전트 목표 파일 열기">목표</button>
-            <button id="open-memory-btn" class="memory-btn" title="메모리 파일 열기">메모리</button>
-            <button id="clear-history-btn" class="clear-btn" title="저장된 대화 삭제">기록 삭제</button>
+            <button id="open-goal-btn" class="goal-btn" title="?먯씠?꾪듃 紐⑺몴 ?뚯씪 ?닿린">紐⑺몴</button>
+            <button id="open-memory-btn" class="memory-btn" title="硫붾え由??뚯씪 ?닿린">硫붾え由?/button>
+            <button id="engine-btn" class="engine-btn" title="LLM ?붿쭊 愿由?>?붿쭊</button>
+            <button id="clear-history-btn" class="clear-btn" title="??λ맂 ?????젣">湲곕줉 ??젣</button>
         </header>
+
+        <!-- Engine Panel -->
+        <div id="engine-panel" style="display:none; padding:10px 14px; background:rgba(0,0,0,0.2); border-bottom:1px solid var(--vscode-panel-border); font-size:12px; max-height:300px; overflow-y:auto;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <strong>?뵩 LLM ?붿쭊 愿由?/strong>
+                <button id="engine-panel-close" style="background:transparent;border:none;color:var(--vscode-descriptionForeground);cursor:pointer;font-size:14px;">??/button>
+            </div>
+            <div id="engine-status-text" style="margin-bottom:8px; color:var(--vscode-descriptionForeground);">?곹깭 議고쉶 以?..</div>
+            <div id="engine-actions" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;"></div>
+            <div id="local-models-section" style="margin-bottom:10px;">
+                <div style="font-weight:600; margin-bottom:4px;">濡쒖뺄 紐⑤뜽</div>
+                <div id="local-models-list" style="color:var(--vscode-descriptionForeground);">?놁쓬</div>
+            </div>
+            <div id="recommended-section">
+                <div style="font-weight:600; margin-bottom:4px;">異붿쿇 紐⑤뜽 ?ㅼ슫濡쒕뱶</div>
+                <div id="recommended-models-list"></div>
+            </div>
+        </div>
 
         <div id="chat-messages" class="chat-messages"></div>
 
         <div class="agent-activity-container" id="agent-activity" style="display: none;">
             <div class="spinner-container">
                 <div class="spinner"></div>
-                <span id="agent-status-text">에이전트가 생각하는 중...</span>
+                <span id="agent-status-text">?먯씠?꾪듃媛 ?앷컖?섎뒗 以?..</span>
             </div>
-            <button id="stop-btn" class="stop-btn">중단</button>
+            <button id="stop-btn" class="stop-btn">以묐떒</button>
         </div>
 
         <div class="chat-input-area">
-            <textarea id="chat-input" placeholder="로컬 에이전트에게 내릴 명령을 입력하세요..." rows="2"></textarea>
-            <button id="send-btn">전송</button>
+            <textarea id="chat-input" placeholder="濡쒖뺄 ?먯씠?꾪듃?먭쾶 ?대┫ 紐낅졊???낅젰?섏꽭??.." rows="2"></textarea>
+            <button id="send-btn">?꾩넚</button>
         </div>
     </div>
 
@@ -128,6 +147,23 @@ body {
 .memory-btn:hover {
     color: var(--vscode-foreground);
     border-color: var(--vscode-focusBorder);
+}
+
+.engine-btn {
+    margin-right: 8px;
+    background: transparent;
+    color: #89b4fa;
+    border: 1px solid rgba(137, 180, 250, 0.4);
+    border-radius: var(--border-radius);
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.engine-btn:hover {
+    color: #cdd6f4;
+    border-color: #89b4fa;
+    background: rgba(137, 180, 250, 0.1);
 }
 
 .clear-btn {
@@ -215,13 +251,13 @@ body {
 }
 
 .log-header::after {
-    content: "▼";
+    content: "??;
     font-size: 8px;
     transition: transform 0.2s;
 }
 
 .log-block.collapsed .log-header::after {
-    content: "▶";
+    content: "??;
 }
 
 .log-content {
@@ -337,6 +373,13 @@ const String kMainJs = r'''(function () {
     const clearHistoryButton = document.getElementById('clear-history-btn');
     const agentActivity = document.getElementById('agent-activity');
     const agentStatusText = document.getElementById('agent-status-text');
+    const engineBtn = document.getElementById('engine-btn');
+    const enginePanel = document.getElementById('engine-panel');
+    const enginePanelClose = document.getElementById('engine-panel-close');
+    const engineStatusText = document.getElementById('engine-status-text');
+    const engineActions = document.getElementById('engine-actions');
+    const localModelsList = document.getElementById('local-models-list');
+    const recommendedModelsList = document.getElementById('recommended-models-list');
 
     let currentLogBlock = null;
     let ws = null;
@@ -362,25 +405,25 @@ const String kMainJs = r'''(function () {
                     break;
                 case 'sessionStart':
                     addMessage(message.userPrompt, 'user');
-                    showActivity(true, '에이전트가 생각하는 중...');
+                    showActivity(true, '?먯씠?꾪듃媛 ?앷컖?섎뒗 以?..');
                     currentLogBlock = null;
                     break;
                 case 'thought':
-                    currentLogBlock = createLogBlock('\uD83E\uDD14 에이전트 생각 (Thought)', message.value);
+                    currentLogBlock = createLogBlock('\uD83E\uDD14 ?먯씠?꾪듃 ?앷컖 (Thought)', message.value);
                     break;
                 case 'toolStart':
                     var argsStr = JSON.stringify(message.args, null, 2);
-                    currentLogBlock = createLogBlock('\u2699\uFE0F 도구 실행: ' + message.name, 'Arguments:\n' + argsStr + '\n\nRunning tool...');
+                    currentLogBlock = createLogBlock('\u2699\uFE0F ?꾧뎄 ?ㅽ뻾: ' + message.name, 'Arguments:\n' + argsStr + '\n\nRunning tool...');
                     currentLogBlock.expand();
-                    showActivity(true, '도구 실행 중: ' + message.name);
+                    showActivity(true, '?꾧뎄 ?ㅽ뻾 以? ' + message.name);
                     break;
                 case 'toolEnd':
                     if (currentLogBlock) {
                         currentLogBlock.setContent(currentLogBlock.contentElement.textContent.replace('Running tool...', '') + 'Output:\n' + message.output);
                     } else {
-                        createLogBlock('\u2699\uFE0F 도구 완료: ' + message.name, 'Output:\n' + message.output);
+                        createLogBlock('\u2699\uFE0F ?꾧뎄 ?꾨즺: ' + message.name, 'Output:\n' + message.output);
                     }
-                    showActivity(true, '에이전트가 결과 해석 중...');
+                    showActivity(true, '?먯씠?꾪듃媛 寃곌낵 ?댁꽍 以?..');
                     break;
                 case 'finalAnswer':
                     addMessage(message.value, 'assistant');
@@ -390,7 +433,7 @@ const String kMainJs = r'''(function () {
                 case 'error':
                     var errDiv = document.createElement('div');
                     errDiv.className = 'error-message';
-                    errDiv.textContent = '\u26A0\uFE0F 오류: ' + message.value;
+                    errDiv.textContent = '\u26A0\uFE0F ?ㅻ쪟: ' + message.value;
                     chatMessages.appendChild(errDiv);
                     showActivity(false);
                     currentLogBlock = null;
@@ -440,11 +483,11 @@ const String kMainJs = r'''(function () {
     });
 
     openMemoryButton.addEventListener('click', function () {
-        alert('메모리 파일을 직접 편집하세요: .noriter-ai/agent-memory.md');
+        alert('硫붾え由??뚯씪??吏곸젒 ?몄쭛?섏꽭?? .noriter-ai/agent-memory.md');
     });
 
     openGoalButton.addEventListener('click', function () {
-        alert('목표 파일을 직접 편집하세요: .noriter-ai/agent-goal.md');
+        alert('紐⑺몴 ?뚯씪??吏곸젒 ?몄쭛?섏꽭?? .noriter-ai/agent-goal.md');
     });
 
     function sendMessage() {
@@ -479,7 +522,7 @@ const String kMainJs = r'''(function () {
     function showSystemMessage() {
         var systemDiv = document.createElement('div');
         systemDiv.className = 'system-message';
-        systemDiv.textContent = '안녕하세요! 로컬 AI 에이전트 Noriter AI입니다. LM Studio 서버를 켜두시면 워크스페이스 내 파일 읽기/쓰기 및 터미널 명령어 실행을 통해 개발을 자동화할 수 있습니다. /models 를 입력하면 현재 엔진에서 사용 가능한 모델 목록을 확인할 수 있습니다.';
+        systemDiv.textContent = '?덈뀞?섏꽭?? 濡쒖뺄 AI ?먯씠?꾪듃 Noriter AI?낅땲?? LM Studio ?쒕쾭瑜?耳쒕몢?쒕㈃ ?뚰겕?ㅽ럹?댁뒪 ???뚯씪 ?쎄린/?곌린 諛??곕???紐낅졊???ㅽ뻾???듯빐 媛쒕컻???먮룞?뷀븷 ???덉뒿?덈떎. /models 瑜??낅젰?섎㈃ ?꾩옱 ?붿쭊?먯꽌 ?ъ슜 媛?ν븳 紐⑤뜽 紐⑸줉???뺤씤?????덉뒿?덈떎.';
         chatMessages.appendChild(systemDiv);
     }
 
@@ -510,7 +553,7 @@ const String kMainJs = r'''(function () {
             if (entry.type === 'error') {
                 var errDiv = document.createElement('div');
                 errDiv.className = 'error-message';
-                errDiv.textContent = '\u26A0\uFE0F 오류: ' + entry.text;
+                errDiv.textContent = '\u26A0\uFE0F ?ㅻ쪟: ' + entry.text;
                 chatMessages.appendChild(errDiv);
             }
         });
