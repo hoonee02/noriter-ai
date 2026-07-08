@@ -1,0 +1,557 @@
+// Embedded static assets for standalone EXE deployment.
+// HTML/CSS/JS are inlined here so dart compile exe produces a single binary.
+
+const String kChatHtml = r'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="/main.css" rel="stylesheet">
+    <title>Noriter AI Chat</title>
+    <style>
+        :root {
+            --vscode-sideBar-background: #1e1e2e;
+            --vscode-sideBar-foreground: #cdd6f4;
+            --vscode-panel-border: rgba(255,255,255,0.1);
+            --vscode-button-background: #89b4fa;
+            --vscode-button-foreground: #1e1e2e;
+            --vscode-button-hoverBackground: #74c7ec;
+            --vscode-input-background: #313244;
+            --vscode-input-foreground: #cdd6f4;
+            --vscode-input-border: rgba(255,255,255,0.2);
+            --vscode-editor-background: #181825;
+            --vscode-focusBorder: #89b4fa;
+            --vscode-descriptionForeground: #a6adc8;
+            --vscode-textPreformat-foreground: #f9e2af;
+            --vscode-textCodeBlock-background: rgba(0,0,0,0.3);
+            --vscode-progressBar-background: #89b4fa;
+            --vscode-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            --vscode-font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <header class="chat-header">
+            <h3>Noriter AI Agent</h3>
+            <span class="status-indicator">Local Engine</span>
+            <button id="open-goal-btn" class="goal-btn" title="에이전트 목표 파일 열기">목표</button>
+            <button id="open-memory-btn" class="memory-btn" title="메모리 파일 열기">메모리</button>
+            <button id="clear-history-btn" class="clear-btn" title="저장된 대화 삭제">기록 삭제</button>
+        </header>
+
+        <div id="chat-messages" class="chat-messages"></div>
+
+        <div class="agent-activity-container" id="agent-activity" style="display: none;">
+            <div class="spinner-container">
+                <div class="spinner"></div>
+                <span id="agent-status-text">에이전트가 생각하는 중...</span>
+            </div>
+            <button id="stop-btn" class="stop-btn">중단</button>
+        </div>
+
+        <div class="chat-input-area">
+            <textarea id="chat-input" placeholder="로컬 에이전트에게 내릴 명령을 입력하세요..." rows="2"></textarea>
+            <button id="send-btn">전송</button>
+        </div>
+    </div>
+
+    <script src="/main.js"></script>
+</body>
+</html>''';
+
+const String kMainCss = r''':root {
+    --border-radius: 6px;
+    --font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif);
+}
+
+body {
+    padding: 0;
+    margin: 0;
+    background-color: var(--vscode-sideBar-background);
+    color: var(--vscode-sideBar-foreground, #cccccc);
+    font-family: var(--font-family);
+    font-size: var(--vscode-font-size, 13px);
+    height: 100vh;
+    overflow: hidden;
+}
+
+.chat-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    box-sizing: border-box;
+}
+
+.chat-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background: rgba(0, 0, 0, 0.1);
+    border-bottom: 1px solid var(--vscode-panel-border, rgba(255, 255, 255, 0.1));
+}
+
+.chat-header h3 {
+    margin: 0;
+    font-weight: 600;
+}
+
+.goal-btn {
+    margin-left: auto;
+    margin-right: 8px;
+    background: transparent;
+    color: var(--vscode-descriptionForeground);
+    border: 1px solid var(--vscode-panel-border, rgba(255, 255, 255, 0.15));
+    border-radius: var(--border-radius);
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.goal-btn:hover {
+    color: var(--vscode-foreground);
+    border-color: var(--vscode-focusBorder);
+}
+
+.memory-btn {
+    margin-right: 8px;
+    background: transparent;
+    color: var(--vscode-descriptionForeground);
+    border: 1px solid var(--vscode-panel-border, rgba(255, 255, 255, 0.15));
+    border-radius: var(--border-radius);
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.memory-btn:hover {
+    color: var(--vscode-foreground);
+    border-color: var(--vscode-focusBorder);
+}
+
+.clear-btn {
+    margin-right: 8px;
+    background: transparent;
+    color: var(--vscode-descriptionForeground);
+    border: 1px solid var(--vscode-panel-border, rgba(255, 255, 255, 0.15));
+    border-radius: var(--border-radius);
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.clear-btn:hover {
+    color: var(--vscode-foreground);
+    border-color: var(--vscode-focusBorder);
+}
+
+.status-indicator {
+    font-size: 10px;
+    background: rgba(0, 255, 100, 0.15);
+    color: #00ff66;
+    padding: 2px 6px;
+    border-radius: 10px;
+    border: 1px solid rgba(0, 255, 100, 0.3);
+}
+
+.chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.system-message {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 10px;
+    border-radius: var(--border-radius);
+    line-height: 1.4;
+    color: var(--vscode-descriptionForeground);
+}
+
+.message {
+    display: flex;
+    flex-direction: column;
+    max-width: 90%;
+    padding: 8px 12px;
+    border-radius: var(--border-radius);
+    line-height: 1.4;
+}
+
+.message.user {
+    align-self: flex-end;
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+.message.assistant {
+    align-self: flex-start;
+    background-color: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-panel-border, rgba(255, 255, 255, 0.1));
+}
+
+.log-block {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: var(--border-radius);
+    margin: 4px 0;
+    overflow: hidden;
+}
+
+.log-header {
+    background: rgba(255, 255, 255, 0.03);
+    padding: 6px 10px;
+    cursor: pointer;
+    font-weight: 500;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    user-select: none;
+    color: var(--vscode-textPreformat-foreground, #e5c07b);
+}
+
+.log-header::after {
+    content: "▼";
+    font-size: 8px;
+    transition: transform 0.2s;
+}
+
+.log-block.collapsed .log-header::after {
+    content: "▶";
+}
+
+.log-content {
+    padding: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.03);
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 11px;
+    white-space: pre-wrap;
+    overflow-x: auto;
+    background-color: var(--vscode-textCodeBlock-background, rgba(0, 0, 0, 0.2));
+}
+
+.log-block.collapsed .log-content {
+    display: none;
+}
+
+.agent-activity-container {
+    padding: 10px 12px;
+    background: rgba(0, 0, 0, 0.2);
+    border-top: 1px solid var(--vscode-panel-border, rgba(255, 255, 255, 0.1));
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.spinner-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-top: 2px solid var(--vscode-progressBar-background, #007acc);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.stop-btn {
+    background: #c7254e;
+    color: white;
+    border: none;
+    padding: 4px 10px;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-size: 11px;
+}
+
+.stop-btn:hover {
+    background: #b11b3e;
+}
+
+.chat-input-area {
+    display: flex;
+    padding: 10px;
+    gap: 8px;
+    border-top: 1px solid var(--vscode-panel-border, rgba(255, 255, 255, 0.1));
+}
+
+.chat-input-area textarea {
+    flex: 1;
+    background-color: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, rgba(255, 255, 255, 0.15));
+    border-radius: var(--border-radius);
+    padding: 6px;
+    resize: none;
+    font-family: inherit;
+    font-size: inherit;
+}
+
+.chat-input-area textarea:focus {
+    outline: 1px solid var(--vscode-focusBorder);
+}
+
+.chat-input-area button {
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border: none;
+    padding: 0 16px;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.chat-input-area button:hover {
+    background-color: var(--vscode-button-hoverBackground);
+}
+
+.error-message {
+    color: #ff5555;
+    background: rgba(255, 85, 85, 0.1);
+    border: 1px solid rgba(255, 85, 85, 0.2);
+    padding: 8px;
+    border-radius: var(--border-radius);
+    margin: 4px 0;
+}''';
+
+const String kMainJs = r'''(function () {
+    const chatMessages = document.getElementById('chat-messages');
+    const chatInput = document.getElementById('chat-input');
+    const sendButton = document.getElementById('send-btn');
+    const stopButton = document.getElementById('stop-btn');
+    const openGoalButton = document.getElementById('open-goal-btn');
+    const openMemoryButton = document.getElementById('open-memory-btn');
+    const clearHistoryButton = document.getElementById('clear-history-btn');
+    const agentActivity = document.getElementById('agent-activity');
+    const agentStatusText = document.getElementById('agent-status-text');
+
+    let currentLogBlock = null;
+    let ws = null;
+    let reconnectTimer = null;
+
+    function connect() {
+        ws = new WebSocket('ws://localhost:3742/ws');
+
+        ws.onopen = function () {
+            ws.send(JSON.stringify({ type: 'webviewReady' }));
+        };
+
+        ws.onmessage = function (event) {
+            const message = JSON.parse(event.data);
+            switch (message.type) {
+                case 'loadHistory':
+                    renderHistory(message.entries);
+                    currentLogBlock = null;
+                    break;
+                case 'historyCleared':
+                    renderHistory([]);
+                    currentLogBlock = null;
+                    break;
+                case 'sessionStart':
+                    addMessage(message.userPrompt, 'user');
+                    showActivity(true, '에이전트가 생각하는 중...');
+                    currentLogBlock = null;
+                    break;
+                case 'thought':
+                    currentLogBlock = createLogBlock('\uD83E\uDD14 에이전트 생각 (Thought)', message.value);
+                    break;
+                case 'toolStart':
+                    var argsStr = JSON.stringify(message.args, null, 2);
+                    currentLogBlock = createLogBlock('\u2699\uFE0F 도구 실행: ' + message.name, 'Arguments:\n' + argsStr + '\n\nRunning tool...');
+                    currentLogBlock.expand();
+                    showActivity(true, '도구 실행 중: ' + message.name);
+                    break;
+                case 'toolEnd':
+                    if (currentLogBlock) {
+                        currentLogBlock.setContent(currentLogBlock.contentElement.textContent.replace('Running tool...', '') + 'Output:\n' + message.output);
+                    } else {
+                        createLogBlock('\u2699\uFE0F 도구 완료: ' + message.name, 'Output:\n' + message.output);
+                    }
+                    showActivity(true, '에이전트가 결과 해석 중...');
+                    break;
+                case 'finalAnswer':
+                    addMessage(message.value, 'assistant');
+                    showActivity(false);
+                    currentLogBlock = null;
+                    break;
+                case 'error':
+                    var errDiv = document.createElement('div');
+                    errDiv.className = 'error-message';
+                    errDiv.textContent = '\u26A0\uFE0F 오류: ' + message.value;
+                    chatMessages.appendChild(errDiv);
+                    showActivity(false);
+                    currentLogBlock = null;
+                    scrollToBottom();
+                    break;
+            }
+        };
+
+        ws.onclose = function () {
+            if (!reconnectTimer) {
+                reconnectTimer = setTimeout(function () {
+                    reconnectTimer = null;
+                    connect();
+                }, 2000);
+            }
+        };
+
+        ws.onerror = function () {
+            ws.close();
+        };
+    }
+
+    connect();
+
+    sendButton.addEventListener('click', function () {
+        sendMessage();
+    });
+
+    chatInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
+
+    stopButton.addEventListener('click', function () {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'stopAgent' }));
+        }
+        showActivity(false);
+    });
+
+    clearHistoryButton.addEventListener('click', function () {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'clearHistory' }));
+        }
+    });
+
+    openMemoryButton.addEventListener('click', function () {
+        alert('메모리 파일을 직접 편집하세요: .noriter-ai/agent-memory.md');
+    });
+
+    openGoalButton.addEventListener('click', function () {
+        alert('목표 파일을 직접 편집하세요: .noriter-ai/agent-goal.md');
+    });
+
+    function sendMessage() {
+        var text = chatInput.value.trim();
+        if (text && ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'sendMessage', value: text }));
+            chatInput.value = '';
+        }
+    }
+
+    function showActivity(show, text) {
+        if (show) {
+            agentActivity.style.display = 'flex';
+            agentStatusText.textContent = text || 'Thinking...';
+            sendButton.disabled = true;
+            chatInput.disabled = true;
+        } else {
+            agentActivity.style.display = 'none';
+            sendButton.disabled = false;
+            chatInput.disabled = false;
+        }
+    }
+
+    function addMessage(text, sender) {
+        var msgDiv = document.createElement('div');
+        msgDiv.className = 'message ' + sender;
+        msgDiv.textContent = text;
+        chatMessages.appendChild(msgDiv);
+        scrollToBottom();
+    }
+
+    function showSystemMessage() {
+        var systemDiv = document.createElement('div');
+        systemDiv.className = 'system-message';
+        systemDiv.textContent = '안녕하세요! 로컬 AI 에이전트 Noriter AI입니다. LM Studio 서버를 켜두시면 워크스페이스 내 파일 읽기/쓰기 및 터미널 명령어 실행을 통해 개발을 자동화할 수 있습니다. /models 를 입력하면 현재 엔진에서 사용 가능한 모델 목록을 확인할 수 있습니다.';
+        chatMessages.appendChild(systemDiv);
+    }
+
+    function renderHistory(entries) {
+        chatMessages.innerHTML = '';
+
+        if (!Array.isArray(entries) || entries.length === 0) {
+            showSystemMessage();
+            scrollToBottom();
+            return;
+        }
+
+        entries.forEach(function (entry) {
+            if (!entry || typeof entry.text !== 'string') {
+                return;
+            }
+
+            if (entry.type === 'user') {
+                addMessage(entry.text, 'user');
+                return;
+            }
+
+            if (entry.type === 'assistant') {
+                addMessage(entry.text, 'assistant');
+                return;
+            }
+
+            if (entry.type === 'error') {
+                var errDiv = document.createElement('div');
+                errDiv.className = 'error-message';
+                errDiv.textContent = '\u26A0\uFE0F 오류: ' + entry.text;
+                chatMessages.appendChild(errDiv);
+            }
+        });
+
+        scrollToBottom();
+    }
+
+    function createLogBlock(title, initialContent) {
+        var block = document.createElement('div');
+        block.className = 'log-block collapsed';
+
+        var header = document.createElement('div');
+        header.className = 'log-header';
+        header.textContent = title;
+
+        var content = document.createElement('div');
+        content.className = 'log-content';
+        content.textContent = initialContent || '';
+
+        header.addEventListener('click', function () {
+            block.classList.toggle('collapsed');
+        });
+
+        block.appendChild(header);
+        block.appendChild(content);
+        chatMessages.appendChild(block);
+        scrollToBottom();
+
+        return {
+            element: block,
+            contentElement: content,
+            setContent: function (text) {
+                content.textContent = text;
+            },
+            expand: function () {
+                block.classList.remove('collapsed');
+            }
+        };
+    }
+
+    function scrollToBottom() {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+}());''';

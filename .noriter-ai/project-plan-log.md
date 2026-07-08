@@ -50,3 +50,13 @@
   - 실행 스모크 테스트 통과 (`/exit` 명령 정상 응답)
   - 빌드 결과물: `dart_platform/build/noriter-ai-0.0.6.exe`
 
+## 2026-07-09 02:19
+- Task: Dart platform bootstrap run
+- Location: C:\Users\hoone\OneDrive\noriter-ai.worktrees\agents-project-brief-overview
+- Summary: CLI app started. Provider endpoint: http://localhost:1234/v1
+
+## 2026-07-09 02:19
+- Task: List models
+- Location: C:\Users\hoone\OneDrive\noriter-ai.worktrees\agents-project-brief-overview
+- Summary: Model listing failed: ClientException with SocketException: 원격 컴퓨터가 네트워크 연결을 거부했습니다 (OS Error: 원격 컴퓨터가 네트워크 연결을 거부했습니다, errno = 1225), address = localhost, port = 14618, uri=http://localhost:1234/v1/models
+
