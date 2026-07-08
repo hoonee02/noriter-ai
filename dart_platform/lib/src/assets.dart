@@ -361,6 +361,44 @@ body {
     padding: 8px;
     border-radius: var(--border-radius);
     margin: 4px 0;
+}
+
+.action-btn {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border: none;
+    padding: 4px 12px;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.action-btn:hover {
+    background: var(--vscode-button-hoverBackground);
+}
+
+.action-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.run-btn {
+    background: #40a02b;
+}
+
+.run-btn:hover {
+    background: #2d8020;
+}
+
+.danger-btn {
+    background: rgba(255, 85, 85, 0.3);
+    color: #ff5555;
+    border: 1px solid rgba(255, 85, 85, 0.4);
+}
+
+.danger-btn:hover {
+    background: rgba(255, 85, 85, 0.5);
 }''';
 
 const String kMainJs = r'''(function () {
@@ -384,12 +422,42 @@ const String kMainJs = r'''(function () {
     let currentLogBlock = null;
     let ws = null;
     let reconnectTimer = null;
+    let engineReady = false;  // tracks whether embedded engine is running
+    let engineMode = 'embedded';
+
+    // Banner shown when engine is not ready
+    var engineBanner = document.createElement('div');
+    engineBanner.id = 'engine-banner';
+    engineBanner.style.cssText = 'display:none; background:rgba(255,165,0,0.15); border:1px solid rgba(255,165,0,0.4); color:#ffcc80; padding:8px 14px; font-size:12px; text-align:center; cursor:pointer;';
+    engineBanner.innerHTML = '\u26A0\uFE0F Engine not started &mdash; click <strong>[Engine]</strong> to set up a local model.';
+    engineBanner.addEventListener('click', function () {
+        enginePanel.style.display = enginePanel.style.display === 'none' ? 'block' : 'none';
+    });
+    document.querySelector('.chat-container').insertBefore(engineBanner, document.getElementById('chat-messages'));
+
+    function setEngineReady(ready) {
+        engineReady = ready;
+        if (engineMode === 'external') {
+            engineBanner.style.display = 'none';
+            chatInput.disabled = false;
+            sendButton.disabled = false;
+            return;
+        }
+        if (ready) {
+            engineBanner.style.display = 'none';
+            chatInput.placeholder = 'Send a message to the local AI agent...';
+        } else {
+            engineBanner.style.display = 'block';
+            chatInput.placeholder = 'Start the engine first \u2192 click [Engine] in the header';
+        }
+    }
 
     function connect() {
         ws = new WebSocket('ws://localhost:3742/ws');
 
         ws.onopen = function () {
             ws.send(JSON.stringify({ type: 'webviewReady' }));
+            ws.send(JSON.stringify({ type: 'getEngineStatus' }));
         };
 
         ws.onmessage = function (event) {
@@ -430,10 +498,35 @@ const String kMainJs = r'''(function () {
                     showActivity(false);
                     currentLogBlock = null;
                     break;
-                case 'error':
-                    var errDiv = document.createElement('div');
-                    errDiv.className = 'error-message';
-                    errDiv.textContent = '\u26A0\uFE0F Error: ' + message.value;
+                case 'engineStatus':
+                    engineMode = message.state && message.state.mode ? message.state.mode : 'embedded';
+                    var isReady = message.state && message.state.status === 'ready';
+                    setEngineReady(isReady);
+                    // Update engine panel UI
+                    if (engineStatusText) {
+                        var statusMsg = message.state ? (message.state.statusMessage || message.state.status) : 'Unknown';
+                        engineStatusText.textContent = statusMsg;
+                    }
+                    updateEngineActions(message);
+                    updateLocalModels(message.localModels || []);
+                    updateRecommendedModels(message.recommendedModels || []);
+                    break;
+                case 'localModelsList':
+                    updateLocalModels(message.models || []);
+                    break;
+                case 'engineNotReady':
+                    var bannerDiv = document.createElement('div');
+                    bannerDiv.className = 'error-message';
+                    bannerDiv.style.cssText = 'background:rgba(255,165,0,0.1); border-color:rgba(255,165,0,0.4); color:#ffcc80;';
+                    bannerDiv.textContent = '\u26A0\uFE0F ' + message.value;
+                    chatMessages.appendChild(bannerDiv);
+                    scrollToBottom();
+                    // Auto-open engine panel
+                    enginePanel.style.display = 'block';
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'getEngineStatus' }));
+                    }
+                    break;
                     chatMessages.appendChild(errDiv);
                     showActivity(false);
                     currentLogBlock = null;
@@ -592,6 +685,90 @@ const String kMainJs = r'''(function () {
                 block.classList.remove('collapsed');
             }
         };
+    }
+
+    function updateEngineActions(msg) {
+        if (!engineActions) return;
+        engineActions.innerHTML = '';
+        var isInstalled = msg.isInstalled;
+        var status = msg.state ? msg.state.status : 'idle';
+        var models = msg.localModels || [];
+        var isBusy = status === 'starting' || status === 'downloadingEngine' || status === 'downloadingModel';
+
+        if (!isInstalled) {
+            var btn = document.createElement('button');
+            btn.className = 'action-btn';
+            btn.textContent = '\u2B07\uFE0F Download Engine';
+            btn.disabled = isBusy;
+            btn.addEventListener('click', function () {
+                ws.send(JSON.stringify({ type: 'downloadEngine' }));
+            });
+            engineActions.appendChild(btn);
+        } else if (status === 'ready') {
+            var stopBtn = document.createElement('button');
+            stopBtn.className = 'action-btn danger-btn';
+            stopBtn.textContent = '\u23F9\uFE0F Stop Engine';
+            stopBtn.addEventListener('click', function () {
+                ws.send(JSON.stringify({ type: 'stopEngine' }));
+            });
+            engineActions.appendChild(stopBtn);
+        } else if (models.length > 0) {
+            var runBtn = document.createElement('button');
+            runBtn.className = 'action-btn run-btn';
+            runBtn.textContent = '\u25B6\uFE0F Run: ' + models[0].split('/').pop().split('\\').pop();
+            runBtn.disabled = isBusy;
+            runBtn.addEventListener('click', function () {
+                ws.send(JSON.stringify({ type: 'startEngine', modelPath: models[0] }));
+            });
+            engineActions.appendChild(runBtn);
+        }
+    }
+
+    function updateLocalModels(models) {
+        if (!localModelsList) return;
+        if (!models || models.length === 0) {
+            localModelsList.textContent = '(none)';
+            return;
+        }
+        localModelsList.innerHTML = '';
+        models.forEach(function (m) {
+            var div = document.createElement('div');
+            var name = m.split('/').pop().split('\\').pop();
+            div.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:3px 0;';
+            div.innerHTML = '<span style="font-size:11px; color:var(--vscode-sideBar-foreground);">' + name + '</span>';
+            var runBtn = document.createElement('button');
+            runBtn.className = 'action-btn';
+            runBtn.style.cssText = 'padding:2px 8px; font-size:11px;';
+            runBtn.textContent = 'Run';
+            runBtn.addEventListener('click', function () {
+                ws.send(JSON.stringify({ type: 'startEngine', modelPath: m }));
+                enginePanel.style.display = 'none';
+            });
+            div.appendChild(runBtn);
+            localModelsList.appendChild(div);
+        });
+    }
+
+    function updateRecommendedModels(models) {
+        if (!recommendedModelsList) return;
+        if (!models || models.length === 0) return;
+        recommendedModelsList.innerHTML = '';
+        models.forEach(function (m) {
+            var div = document.createElement('div');
+            div.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:4px 0; border-top:1px solid var(--vscode-panel-border);';
+            var info = document.createElement('div');
+            info.innerHTML = '<span style="font-size:12px;">' + m.name + '</span><br><span style="font-size:10px; color:var(--vscode-descriptionForeground);">' + (m.sizeHint || '') + '</span>';
+            var dlBtn = document.createElement('button');
+            dlBtn.className = 'action-btn';
+            dlBtn.style.cssText = 'padding:3px 10px; font-size:11px; white-space:nowrap;';
+            dlBtn.textContent = '\u2B07 Download';
+            dlBtn.addEventListener('click', function () {
+                ws.send(JSON.stringify({ type: 'downloadModel', url: m.url, filename: m.filename }));
+            });
+            div.appendChild(info);
+            div.appendChild(dlBtn);
+            recommendedModelsList.appendChild(div);
+        });
     }
 
     function scrollToBottom() {

@@ -340,6 +340,16 @@ class NoriterServer {
       return;
     }
 
+    // Guard: in embedded mode, refuse chat until engine is ready
+    if (config.engineMode == EngineMode.embedded &&
+        _engineState.status != EngineStatus.ready) {
+      final hint = engineManager.isInstalled
+          ? 'Engine is installed but not running.\nOpen the [Engine] panel, select a model, and click Run.'
+          : 'No LLM engine found.\nOpen the [Engine] panel to download llama-server and a model.';
+      _broadcast({'type': 'engineNotReady', 'value': hint});
+      return;
+    }
+
     _cancelled = false;
     await _history.append('user', message);
     _broadcast({'type': 'sessionStart', 'userPrompt': message});

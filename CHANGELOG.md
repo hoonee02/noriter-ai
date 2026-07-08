@@ -5,8 +5,15 @@
 - Fixed encoding corruption in `assets.dart` — all broken Korean characters in HTML/JS UI replaced with English equivalents
 - Fixed broken Korean strings in `server.dart` status messages (engine status, model download progress, error messages)
 
-### Changed
-- All UI text in the embedded web frontend is now in English for encoding stability
+### Added
+- **Engine guard in `server.dart`**: in embedded mode, chat is blocked when engine is not running — returns `engineNotReady` message instead of crashing with SocketException
+- **`engineStatus` WebSocket handler in frontend**: UI now receives and reacts to engine state changes
+- **Engine-not-ready banner**: orange warning bar shown at top of chat when engine is not started; clicking it opens the Engine panel automatically
+- **Input placeholder guidance**: textarea shows "Start the engine first → click [Engine]" when engine is offline
+- **`updateEngineActions` / `updateLocalModels` / `updateRecommendedModels`**: Engine panel now dynamically renders action buttons and model lists from server data
+- **Run button per model**: each downloaded model shows a Run button in the Engine panel
+- **Stop Engine button**: shown when engine is running
+- CSS: `.action-btn`, `.run-btn`, `.danger-btn` button styles
 
 ---
 
