@@ -120,6 +120,16 @@ IMPORTANT: You can only call one tool at a time. Do not write "Observation:" you
       }
 
       try {
+        final requestMessages = _normalizeAlternatingMessages(messages);
+        if (requestMessages.isEmpty) {
+          progress.onError('No valid conversation messages to send.');
+          return;
+        }
+
+        messages
+          ..clear()
+          ..addAll(requestMessages);
+
         final response = await http.post(
           Uri.parse('$_normalizedEndpoint/chat/completions'),
           headers: {
@@ -128,7 +138,7 @@ IMPORTANT: You can only call one tool at a time. Do not write "Observation:" you
           },
           body: jsonEncode({
             'model': modelName,
-            'messages': messages,
+            'messages': requestMessages,
             'temperature': 0.1,
             'stop': ['Observation:', 'Observation\n'],
           }),
@@ -140,10 +150,20 @@ IMPORTANT: You can only call one tool at a time. Do not write "Observation:" you
         }
 
         final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-        final content = (decoded['choices'] as List?)
-                ?.firstOrNull
-                ?.let((c) => (c as Map<String, dynamic>)['message']?['content'] as String?) ??
-            '';
+        final choices = decoded['choices'];
+        String content = '';
+        if (choices is List && choices.isNotEmpty) {
+          final first = choices.first;
+          if (first is Map<String, dynamic>) {
+            final messageObj = first['message'];
+            if (messageObj is Map<String, dynamic>) {
+              final text = messageObj['content'];
+              if (text is String) {
+                content = text;
+              }
+            }
+          }
+        }
 
         if (content.trim().isEmpty) {
           progress.onError(
@@ -271,12 +291,4 @@ $systemPrompt
 [User Message]
 $userMessage
 ''';
-}
-
-extension _Let<T> on T? {
-  R? let<R>(R Function(T) fn) {
-    final v = this;
-    if (v == null) return null;
-    return fn(v);
-  }
 }
