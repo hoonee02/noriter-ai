@@ -56,8 +56,16 @@ class LocalAgent {
     bool Function() isCancelled,
     List<Map<String, String>> contextMessages,
   ) async {
-    final toolsDesc = kTools.map((t) => '- ${t.name}: ${t.description}. Params: ${t.parameters}').join('\n');
-    final toolNames = kTools.map((t) => t.name).join(', ');
+    final cannedReply = _trySmallTalkReply(userMessage);
+    if (cannedReply != null) {
+      progress.onFinalAnswer(cannedReply);
+      return;
+    }
+
+    final allowedTools = _resolveAllowedTools(userMessage);
+    final toolsDesc =
+        allowedTools.map((t) => '- ${t.name}: ${t.description}. Params: ${t.parameters}').join('\n');
+    final toolNames = allowedTools.map((t) => t.name).join(', ');
     final memorySummary = memoryService.getSummary();
     final goalInstructions = goalService.getGoal();
 
@@ -72,6 +80,11 @@ Custom Goal Instructions (from .noriter-ai/agent-goal.md):
 $goalInstructions
 
 Use saveMemory for facts that should persist across tasks, and use getMemory/listMemoryKeys before asking for details that may already be known.
+
+IMPORTANT BEHAVIOR RULES:
+- If the user message is casual conversation (greeting, chit-chat, opinion, or simple Q/A), respond directly with "Final Answer:" and DO NOT use tools.
+- Use tools only when the user explicitly asks for workspace/file/command actions or when a tool is truly needed for accuracy.
+- Never call sendTelegramMessage unless the user explicitly asks to send a Telegram message.
 
 To complete the user's task, you must output step-by-step using this exact ReAct format:
 
@@ -93,6 +106,7 @@ Thought: I now have the final answer.
 Final Answer: The package.json lists ...
 
 IMPORTANT: You can only call one tool at a time. Do not write "Observation:" yourself. You must write "Action:" and "Action Input:" and then STOP writing so the system can run the tool.
+If no tool is needed, return "Final Answer:" immediately.
 ''';
 
     final normalizedContext = _normalizeAlternatingMessages(contextMessages);
@@ -199,6 +213,13 @@ IMPORTANT: You can only call one tool at a time. Do not write "Observation:" you
 
         if (actionMatch != null) {
           final toolName = actionMatch.group(1)!.trim();
+          final allowedToolNames = allowedTools.map((t) => t.name).toSet();
+          if (!allowedToolNames.contains(toolName)) {
+            final feedback =
+                'Tool "$toolName" is not allowed for this user request. Reply directly without tools unless explicitly requested.';
+            messages.add({'role': 'user', 'content': 'Observation: $feedback'});
+            continue;
+          }
           var toolArgsStr = actionInputMatch?.group(1)?.trim() ?? '{}';
 
           // Clean markdown code blocks
@@ -250,6 +271,16 @@ IMPORTANT: You can only call one tool at a time. Do not write "Observation:" you
       }
     }
 
+    for (var i = messages.length - 1; i >= 0; i--) {
+      final msg = messages[i];
+      if (msg['role'] == 'assistant') {
+        final fallback = (msg['content'] ?? '').trim();
+        if (fallback.isNotEmpty) {
+          progress.onFinalAnswer(fallback);
+          return;
+        }
+      }
+    }
     progress.onError('Maximum iterations reached without a final answer.');
   }
 }
@@ -291,4 +322,30 @@ $systemPrompt
 [User Message]
 $userMessage
 ''';
+}
+
+List<Tool> _resolveAllowedTools(String userMessage) {
+  final lower = userMessage.toLowerCase();
+  final asksTelegram = lower.contains('telegram') &&
+      (lower.contains('send') ||
+          lower.contains('메시지') ||
+          lower.contains('보내') ||
+          lower.contains('전송'));
+  if (asksTelegram) {
+    return kTools;
+  }
+  return kTools.where((t) => t.name != 'sendTelegramMessage').toList();
+}
+
+String? _trySmallTalkReply(String userMessage) {
+  final text = userMessage.trim().toLowerCase();
+  final isGreeting = text == '안녕' ||
+      text == '안녕하세요' ||
+      text == 'hi' ||
+      text == 'hello' ||
+      text == 'hey';
+  if (isGreeting) {
+    return '안녕하세요! 무엇을 도와드릴까요? 코드 수정, 파일 분석, 모델 설정 모두 가능합니다.';
+  }
+  return null;
 }
