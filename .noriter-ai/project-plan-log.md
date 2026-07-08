@@ -41,3 +41,12 @@
   - `/models` 명령 및 OpenAI-compatible 모델 목록 조회 구현
   - 누적 계획 로그 append 기능 구현
   - 무서명 EXE 빌드 명령 문서화
+## 2026-07-09 02:15 (KST)
+- 작업 위치: `dart_platform\build\`
+- 요청: EXE 빌드 (`noriter-ai-0.0.6.exe`)
+- 구현:
+  - Dart SDK 3.12.2 설치 완료
+  - `dart compile exe` 로 Windows 단독 실행 EXE 생성 (7.3 MB, 서명 불필요)
+  - 실행 스모크 테스트 통과 (`/exit` 명령 정상 응답)
+  - 빌드 결과물: `dart_platform/build/noriter-ai-0.0.6.exe`
+
