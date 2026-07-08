@@ -79,7 +79,7 @@
     function showSystemMessage() {
         const systemDiv = document.createElement('div');
         systemDiv.className = 'system-message';
-        systemDiv.textContent = '안녕하세요! 로컬 AI 에이전트 Noriter AI입니다. LM Studio 서버를 켜두시면 워크스페이스 내 파일 읽기/쓰기 및 터미널 명령어 실행을 통해 개발을 자동화할 수 있습니다.';
+        systemDiv.textContent = '안녕하세요! 로컬 AI 에이전트 Noriter AI입니다. LM Studio 서버를 켜두시면 워크스페이스 내 파일 읽기/쓰기 및 터미널 명령어 실행을 통해 개발을 자동화할 수 있습니다. /models 를 입력하면 현재 엔진에서 사용 가능한 모델 목록을 확인할 수 있습니다.';
         chatMessages.appendChild(systemDiv);
     }
 

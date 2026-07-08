@@ -1,0 +1,10 @@
+name: noriter_ai_desktop
+description: Noriter AI standalone Dart desktop app scaffold
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  http: ^1.2.2

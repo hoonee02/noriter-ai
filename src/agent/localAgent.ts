@@ -36,6 +36,21 @@ export class LocalAgent {
         });
     }
 
+    public async listAvailableModels(): Promise<string[]> {
+        this.updateConfig();
+
+        if (!this.client) {
+            throw new Error('OpenAI client not initialized.');
+        }
+
+        const response = await this.client.models.list();
+        const modelIds = response.data
+            .map((model) => model.id)
+            .filter((id): id is string => typeof id === 'string' && id.trim().length > 0);
+
+        return Array.from(new Set(modelIds)).sort((a, b) => a.localeCompare(b));
+    }
+
     public async run(
         userMessage: string,
         progress: AgentProgress,

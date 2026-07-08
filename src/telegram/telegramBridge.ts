@@ -108,7 +108,7 @@ export class TelegramBridge {
                 continue;
             }
 
-            const commandResult = this.handleCommand(incomingChatId, userMessage, maxContextMessages);
+            const commandResult = await this.handleCommand(incomingChatId, userMessage, maxContextMessages);
             if (commandResult !== null) {
                 await this.sendMessage(botToken, incomingChatId, commandResult);
                 continue;
@@ -137,7 +137,7 @@ export class TelegramBridge {
         this.chatContext.set(chatId, turns.slice(Math.max(0, turns.length - maxMessages)));
     }
 
-    private handleCommand(chatId: string, text: string, maxContextMessages: number): string | null {
+    private async handleCommand(chatId: string, text: string, maxContextMessages: number): Promise<string | null> {
         if (!text.startsWith('/')) {
             return null;
         }
@@ -157,6 +157,7 @@ export class TelegramBridge {
                     '- /status: show bridge and context status',
                     '- /reset: clear Telegram-side conversation context',
                     '- /goal: show current goal',
+                    '- /models: list models available from current model endpoint',
                     '- /goal <text>: update goal remotely',
                     '',
                     'Tip: If no response arrives, verify bridge settings in VS Code Telegram integration window.'
@@ -180,8 +181,19 @@ export class TelegramBridge {
                     'Current goal summary:',
                     goalSummary,
                     '',
-                    'Commands: /start, /reset, /status, /goal, /goal <new goal text>'
+                    'Commands: /start, /reset, /status, /goal, /models, /goal <new goal text>'
                 ].join('\n');
+            }
+            case '/models': {
+                try {
+                    const models = await this.agent.listAvailableModels();
+                    if (models.length === 0) {
+                        return 'No models reported by the configured model endpoint.';
+                    }
+                    return ['Available models:', ...models.map((model) => `- ${model}`)].join('\n');
+                } catch (error: any) {
+                    return `Failed to list models: ${error.message}`;
+                }
             }
             case '/goal': {
                 if (!workspaceRoot) {
@@ -201,7 +213,7 @@ export class TelegramBridge {
                 return `Goal updated. New goal:\n${payload}`;
             }
             default:
-                return 'Unknown command. Available: /start, /reset, /status, /goal, /goal <new goal text>';
+                return 'Unknown command. Available: /start, /reset, /status, /goal, /models, /goal <new goal text>';
         }
     }
 

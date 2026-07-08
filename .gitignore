@@ -1,5 +1,7 @@
 # Dependencies
 node_modules/
+dart_platform/.dart_tool
+dart_platform/build/
 
 # Compiled files
 dist/

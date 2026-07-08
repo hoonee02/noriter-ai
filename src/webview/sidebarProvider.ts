@@ -159,6 +159,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         if (!this._view) { return; }
         this.loadSettings();
 
+        const normalizedCommand = message.trim().toLowerCase();
+        if (normalizedCommand === '/models') {
+            await this.handleListModelsCommand(message);
+            return;
+        }
+
         if (this._cancellationTokenSource) {
             this._cancellationTokenSource.cancel();
             this._cancellationTokenSource.dispose();
@@ -205,6 +211,29 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             this._view?.webview.postMessage({ type: 'error', value: e.message });
             this._cancellationTokenSource?.dispose();
             this._cancellationTokenSource = undefined;
+        }
+    }
+
+    private async handleListModelsCommand(message: string) {
+        if (!this._view) {
+            return;
+        }
+
+        await this.appendHistory('user', message);
+        this._view.webview.postMessage({ type: 'sessionStart', userPrompt: message });
+
+        try {
+            const models = await this._agent.listAvailableModels();
+            const response = models.length === 0
+                ? '사용 가능한 모델을 찾지 못했습니다. 모델 엔진 상태(LM Studio 또는 OpenAI-compatible endpoint)를 확인하세요.'
+                : ['사용 가능한 모델 목록:', ...models.map((model) => `- ${model}`)].join('\n');
+
+            await this.appendHistory('assistant', response);
+            this._view.webview.postMessage({ type: 'finalAnswer', value: response });
+        } catch (error: any) {
+            const errorMessage = `모델 목록 조회 실패: ${error.message}`;
+            await this.appendHistory('error', errorMessage);
+            this._view.webview.postMessage({ type: 'error', value: errorMessage });
         }
     }
 
