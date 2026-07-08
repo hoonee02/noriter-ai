@@ -423,6 +423,7 @@ const String kMainJs = r'''(function () {
     let ws = null;
     let reconnectTimer = null;
     let engineReady = false;  // tracks whether embedded engine is running
+    let engineInstalled = false;
     let engineMode = 'embedded';
 
     // Banner shown when engine is not ready
@@ -500,6 +501,7 @@ const String kMainJs = r'''(function () {
                     break;
                 case 'engineStatus':
                     engineMode = message.state && message.state.mode ? message.state.mode : 'embedded';
+                    engineInstalled = !!message.isInstalled;
                     var isReady = message.state && message.state.status === 'ready';
                     setEngineReady(isReady);
                     // Update engine panel UI
@@ -754,8 +756,13 @@ const String kMainJs = r'''(function () {
             var runBtn = document.createElement('button');
             runBtn.className = 'action-btn';
             runBtn.style.cssText = 'padding:2px 8px; font-size:11px;';
-            runBtn.textContent = 'Run';
+            runBtn.textContent = engineInstalled ? 'Run' : 'Install Engine First';
+            runBtn.disabled = !engineInstalled;
             runBtn.addEventListener('click', function () {
+                if (!engineInstalled) {
+                    ws.send(JSON.stringify({ type: 'downloadEngine' }));
+                    return;
+                }
                 ws.send(JSON.stringify({ type: 'startEngine', modelPath: m }));
                 enginePanel.style.display = 'none';
             });

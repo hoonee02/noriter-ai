@@ -193,7 +193,8 @@ class LlamaEngineManager {
     final resolvedExe = _findServerExecutablePath();
     if (resolvedExe == null) {
       throw Exception(
-          'llama-server.exe가 없습니다. 먼저 [엔진 다운로드]를 실행하세요.');
+          'llama-server executable not found in: $engineDir\n'
+          'Please click [Download Engine] first.');
     }
     await stopServer();
 
