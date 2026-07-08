@@ -97,50 +97,26 @@ IMPORTANT: You can only call one tool at a time. Do not write "Observation:" you
 
     final normalizedContext = _normalizeAlternatingMessages(contextMessages);
     final messages = <Map<String, String>>[
-      {'role': 'system', 'content': systemPrompt},
       ...normalizedContext,
     ];
+    final enrichedUserMessage = _composeUserTurn(systemPrompt, userMessage);
 
     final shouldAppendCurrentUser = normalizedContext.isEmpty ||
         normalizedContext.last['role'] != 'user' ||
         normalizedContext.last['content'] != userMessage;
     if (shouldAppendCurrentUser) {
-      messages.add({'role': 'user', 'content': userMessage});
+      messages.add({'role': 'user', 'content': enrichedUserMessage});
+    } else if (messages.isNotEmpty && messages.last['role'] == 'user') {
+      messages[messages.length - 1] = {
+        'role': 'user',
+        'content': enrichedUserMessage,
+      };
     }
 
     for (var iteration = 0; iteration < maxIterations; iteration++) {
       if (isCancelled()) {
         progress.onFinalAnswer('Agent stopped by user.');
         return;
-      }
-
-      List<Map<String, String>> _normalizeAlternatingMessages(
-        List<Map<String, String>> source,
-      ) {
-        final result = <Map<String, String>>[];
-        for (final item in source) {
-          final role = item['role'];
-          final content = item['content'];
-          if ((role != 'user' && role != 'assistant') ||
-              content == null ||
-              content.trim().isEmpty) {
-            continue;
-          }
-
-          if (result.isNotEmpty && result.last['role'] == role) {
-            final merged = '${result.last['content']}\n\n$content';
-            result[result.length - 1] = {'role': role!, 'content': merged};
-            continue;
-          }
-
-          result.add({'role': role!, 'content': content});
-        }
-
-        if (result.isNotEmpty && result.first['role'] == 'assistant') {
-          result.removeAt(0);
-        }
-
-        return result;
       }
 
       try {
@@ -285,6 +261,16 @@ List<Map<String, String>> _normalizeAlternatingMessages(
   }
 
   return result;
+}
+
+String _composeUserTurn(String systemPrompt, String userMessage) {
+  return '''
+[Agent Instructions]
+$systemPrompt
+
+[User Message]
+$userMessage
+''';
 }
 
 extension _Let<T> on T? {
