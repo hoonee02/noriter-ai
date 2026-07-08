@@ -24,9 +24,10 @@ class LlamaEngineManager {
 
   String get engineDir => p.join(_appDataDir, 'noriter-ai', 'engine');
   String get modelsDir => p.join(_appDataDir, 'noriter-ai', 'models');
-  String get serverExePath => p.join(engineDir, 'llama-server.exe');
+  String get serverExePath =>
+      _findServerExecutablePath() ?? p.join(engineDir, 'llama-server.exe');
 
-  bool get isInstalled => File(serverExePath).existsSync();
+  bool get isInstalled => _findServerExecutablePath() != null;
   int? get activePort => _activePort;
   String? get activeModelPath => _activeModelPath;
 
@@ -189,7 +190,8 @@ class LlamaEngineManager {
   /// Starts llama-server.exe with the given model. Polls /health until ready
   /// (timeout: 30s).
   Future<Process> startServer(String modelPath, {int port = 8080}) async {
-    if (!isInstalled) {
+    final resolvedExe = _findServerExecutablePath();
+    if (resolvedExe == null) {
       throw Exception(
           'llama-server.exe가 없습니다. 먼저 [엔진 다운로드]를 실행하세요.');
     }
@@ -199,9 +201,9 @@ class LlamaEngineManager {
     _activeModelPath = modelPath;
 
     final process = await Process.start(
-      serverExePath,
+      resolvedExe,
       ['-m', modelPath, '--port', '$port', '--host', '127.0.0.1', '-c', '4096', '-ngl', '0'],
-      workingDirectory: engineDir,
+      workingDirectory: File(resolvedExe).parent.path,
     );
     _serverProcess = process;
 
@@ -248,5 +250,23 @@ class LlamaEngineManager {
         .map((f) => f.path)
         .toList()
       ..sort();
+  }
+
+  String? _findServerExecutablePath() {
+    final engine = Directory(engineDir);
+    if (!engine.existsSync()) return null;
+
+    String? fallback;
+    for (final entity in engine.listSync(recursive: true)) {
+      if (entity is! File) continue;
+      final name = p.basename(entity.path).toLowerCase();
+      if (!name.endsWith('.exe')) continue;
+      if (!name.startsWith('llama-server')) continue;
+      if (name == 'llama-server.exe') {
+        return entity.path;
+      }
+      fallback ??= entity.path;
+    }
+    return fallback;
   }
 }

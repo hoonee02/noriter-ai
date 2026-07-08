@@ -527,6 +527,10 @@ const String kMainJs = r'''(function () {
                         ws.send(JSON.stringify({ type: 'getEngineStatus' }));
                     }
                     break;
+                case 'error':
+                    var errDiv = document.createElement('div');
+                    errDiv.className = 'error-message';
+                    errDiv.textContent = '\u26A0\uFE0F Error: ' + message.value;
                     chatMessages.appendChild(errDiv);
                     showActivity(false);
                     currentLogBlock = null;
@@ -550,6 +554,17 @@ const String kMainJs = r'''(function () {
     }
 
     connect();
+
+    engineBtn.addEventListener('click', function () {
+        enginePanel.style.display = enginePanel.style.display === 'none' ? 'block' : 'none';
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'getEngineStatus' }));
+        }
+    });
+
+    enginePanelClose.addEventListener('click', function () {
+        enginePanel.style.display = 'none';
+    });
 
     sendButton.addEventListener('click', function () {
         sendMessage();

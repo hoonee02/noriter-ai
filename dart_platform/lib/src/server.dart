@@ -212,6 +212,10 @@ class NoriterServer {
         }
         break;
 
+      case 'stopEngine':
+        unawaited(_runStopEngine());
+        break;
+
       case 'downloadModel':
         final url = msg['url'] as String?;
         final filename = msg['filename'] as String?;
@@ -279,12 +283,24 @@ class NoriterServer {
       _engineState.status = EngineStatus.error;
       _engineState.statusMessage = 'Model download failed: $e';
     }
+
     _broadcastEngineStatus();
     // Refresh model list after download
     _broadcast({
       'type': 'localModelsList',
       'models': engineManager.listLocalModels(),
     });
+  }
+
+  Future<void> _runStopEngine() async {
+    await engineManager.stopServer();
+    _engineState.status = EngineStatus.idle;
+    _engineState.serverPort = null;
+    _engineState.activeModelPath = null;
+    _engineState.statusMessage = engineManager.isInstalled
+        ? 'Engine stopped.'
+        : 'Engine is not installed.';
+    _broadcastEngineStatus();
   }
 
   void _broadcastEngineStatus() {
@@ -405,4 +421,3 @@ void unawaited(Future<void> future) {
     stderr.writeln('Unhandled background error: $e');
   });
 }
-
