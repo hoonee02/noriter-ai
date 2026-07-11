@@ -13,7 +13,7 @@ See also: [CHANGELOG.md](CHANGELOG.md) for release history, [BUGFIXES.md](BUGFIX
 ## Architecture
 
 ```
-noriter-ai-0.0.9.exe
+noriter-ai-0.1.0.exe
 └── Dart AOT binary (single file, no runtime dependency)
     ├── HTTP server  (shelf)  → localhost:3742
     │   ├── GET  /          → embedded HTML (chat UI)
@@ -21,15 +21,15 @@ noriter-ai-0.0.9.exe
     │   ├── GET  /main.js   → embedded JS
     │   └── WS   /ws        → WebSocket (bidirectional agent communication)
     │
-    ├── LlamaEngineManager
-    │   ├── Downloads llama-server.exe from github.com/ggerganov/llama.cpp releases
-    │   ├── Extracts to %APPDATA%\noriter-ai\engine\
-    │   ├── Starts llama-server as a subprocess on port 8080
-    │   └── Exposes OpenAI-compatible API at http://127.0.0.1:8080/v1
-    │
-    ├── ModelDownloadService
-    │   ├── Downloads GGUF model files (Hugging Face URLs)
-    │   └── Stores in %APPDATA%\noriter-ai\models\
+    ├── OllamaEngineManager
+    │   ├── Detects a local Ollama install (default install paths, then PATH)
+    │   ├── Starts `ollama serve` if installed but not running
+    │   ├── Pulls/lists models via Ollama's HTTP API (/api/pull, /api/tags)
+    │   ├── "Runs" a model by warming it with an empty /api/generate call
+    │   │   (num_ctx set here persists for later chat calls while it stays loaded)
+    │   ├── If not installed, opens ollama.com/download in the browser --
+    │   │   the app does not silently download/run the installer itself
+    │   └── Exposes OpenAI-compatible API at http://127.0.0.1:11434/v1
     │
     ├── LocalAgent  (ReAct loop)
     │   ├── Thought → Tool → Observation loop
@@ -65,8 +65,15 @@ noriter-ai-0.0.9.exe
 
 | Mode | Trigger | LLM endpoint |
 |------|---------|-------------|
-| **Embedded** (default) | `NORITER_MODEL_ENDPOINT` not set | `http://127.0.0.1:8080/v1` (llama-server) |
+| **Embedded** (default) | `NORITER_MODEL_ENDPOINT` not set | `http://127.0.0.1:11434/v1` (Ollama) |
 | **External** | `NORITER_MODEL_ENDPOINT=http://...` env var | Custom OpenAI-compatible URL (e.g. LM Studio) |
+
+Prior to v0.1.0 the embedded engine was a bundled llama.cpp (`llama-server.exe`)
+subprocess reading GGUF files directly. That constrained models to whatever
+had been manually converted to GGUF and downloaded by URL. Ollama replaces
+that: it manages its own model registry, handles pulling/quantization
+internally, and is addressed purely by model tag (e.g. `gemma3:4b`) instead
+of a filesystem path -- a much lower-friction "pick a model, click Run" flow.
 
 ---
 
@@ -86,14 +93,14 @@ noriter-ai-0.0.9.exe
 
 ---
 
-## Recommended GGUF Models
+## Recommended Models (Ollama tags)
 
-| Model | Size | Notes |
-|-------|------|-------|
-| Qwen2.5-0.5B-Instruct-GGUF | ~400 MB | Fastest, low RAM |
-| Llama-3.2-1B-Instruct-GGUF | ~800 MB | Good balance |
-| Phi-3-mini-4k-instruct-GGUF | ~2.2 GB | High quality small model |
-| Gemma-2-2B-GGUF | ~1.6 GB | Google Gemma 2 |
+| Model | Ollama tag | Notes |
+|-------|-----------|-------|
+| Gemma-3-1B-Instruct | `gemma3:1b` | Fastest, low RAM |
+| Llama-3.2-1B-Instruct | `llama3.2:1b` | Alternative to Gemma-3-1B |
+| Gemma-3-4B-Instruct | `gemma3:4b` | Best overall quality/speed |
+| Phi-3-mini | `phi3:mini` | Quality alternative |
 
 ---
 
@@ -106,14 +113,14 @@ noriter-ai-0.0.9.exe
 | `sendMessage` | `{ value: string, attachment?: { name, content } }` | Run agent with user message, optionally embedding an attached local file's text content |
 | `stopAgent` | — | Cancel current agent run |
 | `clearHistory` | — | Clear chat history |
-| `downloadEngine` | — | Download llama-server.exe |
-| `startEngine` | `{ modelPath: string, contextSize?: int }` | Start llama-server with a model (contextSize clamped 512–32768, default 4096) |
-| `downloadModel` | `{ url, filename? }` | Download a GGUF model |
+| `downloadEngine` | — | If Ollama isn't installed, opens its download page in the browser; if installed, starts `ollama serve` |
+| `startEngine` | `{ modelPath: <ollama tag>, contextSize?: int }` | Loads a model into Ollama (contextSize clamped 512–32768, default 4096; `modelPath` holds the Ollama tag despite the legacy field name) |
+| `downloadModel` | `{ tag: <ollama tag> }` | Pulls a model via Ollama |
 | `getEngineStatus` | — | Request current engine state |
-| `listLocalModels` | — | List downloaded GGUF models |
+| `listLocalModels` | — | List models already pulled into Ollama |
 | `getTelegramStatus` | — | Request current Telegram bridge status |
 | `updateTelegramConfig` | `{ botToken?, chatId?, enabled? }` | Save Telegram settings and start/stop the bridge |
-| `openModelsFolder` | — | Opens the local GGUF models folder in Windows Explorer |
+| `openModelsFolder` | — | Opens Ollama's model storage folder in Windows Explorer |
 
 ### Server → Client
 
@@ -136,7 +143,7 @@ noriter-ai-0.0.9.exe
 ## File Layout
 
 ```
-noriter-ai-0.0.9.exe          ← Standalone Windows EXE (no installer needed)
+noriter-ai-0.1.0.exe          ← Standalone Windows EXE (no installer needed)
 CHANGELOG.md                   ← Version history
 SPEC.md                        ← This file
 
@@ -148,16 +155,15 @@ dart_platform/                 ← Dart source code
     config.dart                ← AppConfig (port, endpoint, engine mode)
     local_agent.dart           ← ReAct agent loop
     tools.dart                 ← 9 built-in tools
-    llama_engine_manager.dart  ← llama-server.exe lifecycle manager
-    model_download_service.dart← GGUF model downloader
     engine_state.dart          ← EngineMode / EngineStatus enums + state
     history_service.dart       ← Chat history persistence (JSON)
     memory_service.dart        ← Agent memory file (Markdown)
     goal_service.dart          ← Agent goal file (Markdown)
     model_provider.dart        ← OpenAI-compatible HTTP client
+    ollama_engine_manager.dart ← Ollama detection/serve/pull/run + recommended model list
     telegram_bridge.dart       ← Telegram Bot API long-polling bridge
     telegram_config_service.dart← Telegram bot token / chat ID persistence
-    last_engine_service.dart   ← Remembers last-started model + context size
+    last_engine_service.dart   ← Remembers last-started model tag + context size
     agent_app.dart             ← (legacy CLI bootstrap, superseded by server.dart)
     plan_logger.dart           ← Appends to project-plan-log.md
 
@@ -173,7 +179,7 @@ src/                           ← Legacy VS Code extension (TypeScript, v0.0.5)
   agent-goal.md
   project-plan-log.md
   telegram-config.json         ← Bot token / chat ID (gitignored, contains secrets)
-  last-engine.json             ← Last-started model path + context size
+  last-engine.json             ← Last-started Ollama model tag + context size
 ```
 
 ---
@@ -182,17 +188,19 @@ src/                           ← Legacy VS Code extension (TypeScript, v0.0.5)
 
 ```batch
 REM Just double-click or run from terminal:
-noriter-ai-0.0.9.exe
+noriter-ai-0.1.0.exe
 
 REM Optionally specify a workspace path:
-noriter-ai-0.0.9.exe C:\MyProject
+noriter-ai-0.1.0.exe C:\MyProject
 
 REM Use external LLM (e.g. LM Studio on port 1234):
 set NORITER_MODEL_ENDPOINT=http://localhost:1234/v1
-noriter-ai-0.0.9.exe
+noriter-ai-0.1.0.exe
 ```
 
 The app opens `http://localhost:3742` in your default browser automatically.
+
+Requires [Ollama](https://ollama.com/download) to be installed for embedded mode. If it isn't found, the [Engine] panel's Install button opens the download page for you.
 
 ---
 
@@ -203,5 +211,5 @@ Requires [Dart SDK](https://dart.dev/get-dart) 3.3+.
 ```batch
 cd dart_platform
 dart pub get
-dart compile exe bin/noriter_ai.dart -o ..\noriter-ai-0.0.9.exe
+dart compile exe bin/noriter_ai.dart -o ..\noriter-ai-0.1.0.exe
 ```

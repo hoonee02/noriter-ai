@@ -2,6 +2,15 @@
 
 See [BUGFIXES.md](BUGFIXES.md) for a detailed, symptom → root cause → fix log of every bug found during development.
 
+## [0.1.0] - 2026-07-11
+### Changed
+- **Embedded engine backend switched from llama.cpp to Ollama.** Priority was frictionless local model use ("no manual GGUF hunting, one click to chat"); Ollama manages model pulling/quantization internally and is addressed by tag (`gemma3:4b`) instead of a downloaded file path.
+  - `OllamaEngineManager` replaces `LlamaEngineManager` -- detects an Ollama install, starts `ollama serve` if needed, pulls/lists models via its HTTP API, and "runs" a model by warming it into memory (previously a `llama-server.exe` subprocess per model).
+  - Embedded endpoint moved from `http://127.0.0.1:8080/v1` to Ollama's OpenAI-compatible `http://127.0.0.1:11434/v1`.
+  - Recommended model list now references Ollama tags (`gemma3:1b`, `llama3.2:1b`, `gemma3:4b`, `phi3:mini`) instead of Hugging Face GGUF URLs; `model_download_service.dart` and `llama_engine_manager.dart` removed as dead code.
+  - The app does not silently install Ollama on your behalf -- if it's missing, the Engine panel's button opens the official download page instead.
+  - `.noriter-ai/last-engine.json` now stores an Ollama tag rather than a file path.
+
 ## [0.0.9] - 2026-07-11
 ### Added
 - **Local file attachment in chat**: new paperclip button next to the chat input lets you attach a local text-based file (txt, md, json, csv, code, log, etc., up to 500 KB); its content is read client-side and embedded in the next message sent to the agent, so it can review/summarize/edit it like any other conversation turn

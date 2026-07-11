@@ -28,9 +28,9 @@ class AppConfig {
     final engineMode =
         isEmbedded ? EngineMode.embedded : EngineMode.external;
     final endpoint =
-        isEmbedded ? 'http://localhost:8080/v1' : envEndpoint!;
+        isEmbedded ? 'http://127.0.0.1:11434/v1' : envEndpoint;
 
-    final apiKey = Platform.environment['NORITER_MODEL_API_KEY'] ?? 'local';
+    final apiKey = Platform.environment['NORITER_MODEL_API_KEY'] ?? 'ollama';
     final modelName =
         Platform.environment['NORITER_MODEL_NAME'] ?? 'local-model';
     final portStr = Platform.environment['NORITER_PORT'] ?? '3742';

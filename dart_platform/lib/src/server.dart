@@ -11,11 +11,10 @@ import 'package:noriter_ai_desktop/src/assets.dart';
 import 'package:noriter_ai_desktop/src/config.dart';
 import 'package:noriter_ai_desktop/src/engine_state.dart';
 import 'package:noriter_ai_desktop/src/history_service.dart';
-import 'package:noriter_ai_desktop/src/llama_engine_manager.dart';
+import 'package:noriter_ai_desktop/src/ollama_engine_manager.dart';
 import 'package:noriter_ai_desktop/src/local_agent.dart';
 import 'package:noriter_ai_desktop/src/memory_service.dart';
 import 'package:noriter_ai_desktop/src/goal_service.dart';
-import 'package:noriter_ai_desktop/src/model_download_service.dart';
 import 'package:noriter_ai_desktop/src/model_provider.dart';
 import 'package:noriter_ai_desktop/src/telegram_bridge.dart';
 import 'package:noriter_ai_desktop/src/telegram_config_service.dart';
@@ -25,13 +24,18 @@ class NoriterServer {
   NoriterServer({required this.config, required this.engineManager});
 
   final AppConfig config;
-  final LlamaEngineManager engineManager;
+  final OllamaEngineManager engineManager;
 
   late final HistoryService _history;
   late final MemoryService _memory;
   late final GoalService _goal;
   late LocalAgent _agent;
   late OpenAiCompatibleModelProvider _provider;
+
+  /// The exact Ollama model tag currently loaded, used as the `model` field
+  /// in chat requests -- Ollama requires an exact match, unlike llama-server
+  /// which mostly ignored the `model` field in the request body.
+  String? _activeModelTag;
 
   late final TelegramConfigService _telegramConfigService;
   late TelegramConfig _telegramConfig;
@@ -56,7 +60,7 @@ class NoriterServer {
     _goal = GoalService(workspaceRoot: config.workspacePath);
 
     _activeEndpoint = config.engineMode == EngineMode.embedded
-        ? 'http://127.0.0.1:8080/v1'
+        ? '${OllamaEngineManager.baseUrl}/v1'
         : config.modelEndpoint;
 
     _engineState.mode = config.engineMode;
@@ -86,8 +90,14 @@ class NoriterServer {
 
     _lastEngineService = LastEngineService(workspaceRoot: config.workspacePath);
     _lastEngineConfig = await _lastEngineService.load();
-    if (_lastEngineConfig != null && !File(_lastEngineConfig!.modelPath).existsSync()) {
-      _lastEngineConfig = null;
+    if (_lastEngineConfig != null) {
+      // The remembered value is an Ollama tag (e.g. "gemma3:4b"), not a file
+      // path -- validate it's still actually pulled rather than checking
+      // the filesystem.
+      final localModels = await engineManager.refreshLocalModels();
+      if (!localModels.contains(_lastEngineConfig!.modelPath)) {
+        _lastEngineConfig = null;
+      }
     }
 
     final handler = const Pipeline()
@@ -109,7 +119,7 @@ class NoriterServer {
     _agent = LocalAgent(
       endpoint: _activeEndpoint,
       apiKey: config.apiKey,
-      modelName: config.modelName,
+      modelName: _activeModelTag ?? config.modelName,
       workspaceRoot: config.workspacePath,
       memoryService: _memory,
       goalService: _goal,
@@ -242,20 +252,17 @@ class NoriterServer {
         break;
 
       case 'listLocalModels':
-        _sendTo(channel, {
-          'type': 'localModelsList',
-          'models': engineManager.listLocalModels(),
-        });
+        unawaited(_refreshAndSendLocalModels(channel));
         break;
 
       case 'startEngine':
-        final modelPath = msg['modelPath'] as String?;
+        final modelTag = msg['modelPath'] as String?;
         final requestedContextSize = msg['contextSize'];
         final contextSize = requestedContextSize is int
             ? requestedContextSize.clamp(512, 32768)
             : _engineState.contextSize;
-        if (modelPath != null && modelPath.isNotEmpty) {
-          unawaited(_runStartEngine(modelPath, contextSize));
+        if (modelTag != null && modelTag.isNotEmpty) {
+          unawaited(_runStartEngine(modelTag, contextSize));
         }
         break;
 
@@ -264,10 +271,9 @@ class NoriterServer {
         break;
 
       case 'downloadModel':
-        final url = msg['url'] as String?;
-        final filename = msg['filename'] as String?;
-        if (url != null && url.isNotEmpty) {
-          unawaited(_runDownloadModel(url, filename));
+        final tag = (msg['tag'] as String?) ?? (msg['url'] as String?);
+        if (tag != null && tag.isNotEmpty) {
+          unawaited(_runDownloadModel(tag));
         }
         break;
 
@@ -331,8 +337,8 @@ class NoriterServer {
     if (config.engineMode == EngineMode.embedded &&
         _engineState.status != EngineStatus.ready) {
       return engineManager.isInstalled
-          ? 'Engine is installed but not running. Open the app and start the engine from the [Engine] panel.'
-          : 'No LLM engine found. Open the app and download the engine from the [Engine] panel.';
+          ? 'Ollama is installed but no model is loaded. Open the app and start a model from the [Engine] panel.'
+          : 'Ollama is not installed. Open the app and install it from the [Engine] panel.';
     }
 
     _cancelled = false;
@@ -380,36 +386,49 @@ class NoriterServer {
     );
   }
 
+  Future<void> _refreshAndSendLocalModels(WebSocketChannel channel) async {
+    final models = await engineManager.refreshLocalModels();
+    _sendTo(channel, {'type': 'localModelsList', 'models': models});
+  }
+
+  /// "Downloading the engine" now means opening Ollama's download page --
+  /// we don't silently fetch and run a third-party installer ourselves.
+  /// Once the user installs it and comes back, [ensureRunning] picks it up.
   Future<void> _runDownloadEngine() async {
     try {
-      await engineManager.downloadEngine(onStatus: (status) {
-        _engineState.statusMessage = status;
+      if (!engineManager.isInstalled) {
+        await engineManager.openDownloadPage();
+        _engineState.status = EngineStatus.error;
+        _engineState.statusMessage =
+            'Opened the Ollama download page in your browser. Install it, then reopen this app.';
         _broadcastEngineStatus();
-      });
+        return;
+      }
+      await engineManager.ensureRunning();
+      await engineManager.refreshLocalModels();
       _engineState.status = EngineStatus.idle;
-      _engineState.statusMessage = 'Engine installed! Download a model and click Run.';
+      _engineState.statusMessage = 'Ollama is running! Pull a model and click Run.';
     } catch (e) {
       _engineState.status = EngineStatus.error;
-      _engineState.statusMessage = 'Engine download failed: $e';
+      _engineState.statusMessage = 'Failed to start Ollama: $e';
     }
     _broadcastEngineStatus();
   }
 
-  Future<void> _runStartEngine(String modelPath, int contextSize) async {
+  Future<void> _runStartEngine(String modelTag, int contextSize) async {
     _engineState.status = EngineStatus.starting;
-    _engineState.statusMessage = 'Starting engine...';
-    _engineState.activeModelPath = modelPath;
+    _engineState.statusMessage = 'Loading $modelTag...';
+    _engineState.activeModelPath = modelTag;
     _engineState.contextSize = contextSize;
     _broadcastEngineStatus();
     try {
-      await engineManager.startServer(modelPath, contextSize: contextSize);
-      _activeEndpoint = 'http://127.0.0.1:${engineManager.activePort}/v1';
+      await engineManager.runModel(modelTag, contextSize: contextSize);
+      _activeModelTag = modelTag;
+      _activeEndpoint = '${OllamaEngineManager.baseUrl}/v1';
       _rebuildAgent();
       _engineState.status = EngineStatus.ready;
-      _engineState.serverPort = engineManager.activePort;
-      _engineState.contextSize = engineManager.activeContextSize ?? contextSize;
       _engineState.statusMessage = 'Engine ready! Start chatting.';
-      _lastEngineConfig = LastEngineConfig(modelPath: modelPath, contextSize: _engineState.contextSize);
+      _lastEngineConfig = LastEngineConfig(modelPath: modelTag, contextSize: contextSize);
       unawaited(_lastEngineService.save(_lastEngineConfig!));
     } catch (e) {
       _engineState.status = EngineStatus.error;
@@ -418,46 +437,43 @@ class NoriterServer {
     _broadcastEngineStatus();
   }
 
-  Future<void> _runDownloadModel(String url, String? filename) async {
+  Future<void> _runDownloadModel(String tag) async {
     _engineState.status = EngineStatus.downloadingModel;
-    _engineState.statusMessage = 'Model download starting...';
+    _engineState.statusMessage = 'Pulling $tag...';
     _broadcastEngineStatus();
     try {
-      final svc = ModelDownloadService(modelsDir: engineManager.modelsDir);
-      await svc.downloadModel(
-        url,
-        saveName: filename,
-        onProgress: (received, total) {
-          final mb = (received / 1024 / 1024).toStringAsFixed(1);
-          final totalMb = total > 0 ? (total / 1024 / 1024).toStringAsFixed(1) : '?';
-          final pct = total > 0 ? '${received * 100 ~/ total}%' : '';
-          _engineState.statusMessage = 'Downloading... $mb MB / $totalMb MB $pct';
+      await engineManager.pullModel(
+        tag,
+        onProgress: (status, completed, total) {
+          final pct = (total != null && total > 0 && completed != null) ? ' (${completed * 100 ~/ total}%)' : '';
+          _engineState.statusMessage = '$status$pct';
           _broadcastEngineStatus();
         },
       );
       _engineState.status = EngineStatus.idle;
-      _engineState.statusMessage = 'Model download complete!';
+      _engineState.statusMessage = '$tag pulled!';
     } catch (e) {
       _engineState.status = EngineStatus.error;
-      _engineState.statusMessage = 'Model download failed: $e';
+      _engineState.statusMessage = 'Model pull failed: $e';
     }
 
     _broadcastEngineStatus();
-    // Refresh model list after download
+    // Refresh model list after pulling
     _broadcast({
       'type': 'localModelsList',
-      'models': engineManager.listLocalModels(),
+      'models': await engineManager.refreshLocalModels(),
     });
   }
 
   Future<void> _runStopEngine() async {
-    await engineManager.stopServer();
+    await engineManager.stopModel();
+    _activeModelTag = null;
     _engineState.status = EngineStatus.idle;
     _engineState.serverPort = null;
     _engineState.activeModelPath = null;
     _engineState.statusMessage = engineManager.isInstalled
-        ? 'Engine stopped.'
-        : 'Engine is not installed.';
+        ? 'Model unloaded.'
+        : 'Ollama is not installed.';
     _broadcastEngineStatus();
   }
 
@@ -465,13 +481,12 @@ class NoriterServer {
     _broadcast(_engineStatusPayload());
   }
 
-  /// The engine that actually runs the LLM: llama.cpp's `llama-server.exe`
-  /// subprocess (embedded mode) or an external OpenAI-compatible server the
-  /// user pointed the app at via NORITER_MODEL_ENDPOINT. Surfaced to the UI
-  /// so "what's running this?" and "where are the model files?" are visible
-  /// instead of implicit.
+  /// The engine that actually runs the LLM: a local Ollama server (embedded
+  /// mode) or an external OpenAI-compatible server the user pointed the app
+  /// at via NORITER_MODEL_ENDPOINT. Surfaced to the UI so "what's running
+  /// this?" and "where are the model files?" are visible instead of implicit.
   String get _engineBackendLabel => config.engineMode == EngineMode.embedded
-      ? 'llama.cpp (llama-server.exe, embedded)'
+      ? 'Ollama (${OllamaEngineManager.baseUrl}, embedded)'
       : 'External OpenAI-compatible server (${config.modelEndpoint})';
 
   Map<String, dynamic> _engineStatusPayload() => {
@@ -479,7 +494,7 @@ class NoriterServer {
         'state': _engineState.toJson(),
         'isInstalled': engineManager.isInstalled,
         'localModels': engineManager.listLocalModels(),
-        'recommendedModels': ModelDownloadService.recommendedModels,
+        'recommendedModels': OllamaEngineManager.recommendedModels,
         'activeModelPath': engineManager.activeModelPath,
         'engineBackend': _engineBackendLabel,
         'modelsDir': engineManager.modelsDir,
@@ -566,13 +581,13 @@ class NoriterServer {
       final modelLines = models.isEmpty ? ['  (none)'] : models.map((m) => '  - $m').toList();
       final response = [
         '[Engine Status]',
-        '- llama-server: $installed',
+        '- Ollama: $installed',
         '- Status: $status',
         '- Active model: $activeModel',
         '- Local models:',
         ...modelLines,
         '',
-        'Use the [Engine] button in the header to download and start a model.',
+        'Use the [Engine] button in the header to pull and run a model.',
       ].join('\n');
       await _history.append('assistant', response);
       _broadcast({'type': 'finalAnswer', 'value': response});
@@ -583,8 +598,8 @@ class NoriterServer {
     if (config.engineMode == EngineMode.embedded &&
         _engineState.status != EngineStatus.ready) {
       final hint = engineManager.isInstalled
-          ? 'Engine is installed but not running.\nOpen the [Engine] panel, select a model, and click Run.'
-          : 'No LLM engine found.\nOpen the [Engine] panel to download llama-server and a model.';
+          ? 'Ollama is installed but no model is loaded.\nOpen the [Engine] panel, select a model, and click Run.'
+          : 'Ollama is not installed.\nOpen the [Engine] panel to install Ollama and pull a model.';
       _broadcast({'type': 'engineNotReady', 'value': hint});
       return;
     }

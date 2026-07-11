@@ -96,7 +96,7 @@ const String kChatHtml = r'''<!DOCTYPE html>
                 <div id="local-models-list" style="color:var(--vscode-descriptionForeground);">(none)</div>
             </div>
             <div id="recommended-section">
-                <div style="font-weight:600; margin-bottom:4px;">Download Recommended Models</div>
+                <div style="font-weight:600; margin-bottom:4px;">Pull Recommended Models</div>
                 <div id="recommended-models-list"></div>
             </div>
         </div>
@@ -983,11 +983,11 @@ const String kMainJs = r'''(function () {
         if (!isInstalled) {
             var opt = document.createElement('option');
             opt.value = '';
-            opt.textContent = 'Engine not installed yet';
+            opt.textContent = 'Ollama not installed yet';
             engineModelSelect.appendChild(opt);
             engineModelSelect.disabled = true;
             engineRunBtn.className = 'action-btn';
-            engineRunBtn.textContent = '\u2B07\uFE0F Download Engine';
+            engineRunBtn.textContent = '\u2B07\uFE0F Install Ollama';
             engineRunBtn.disabled = isBusy;
             engineRunBtn.onclick = function () {
                 ws.send(JSON.stringify({ type: 'downloadEngine' }));
@@ -998,7 +998,7 @@ const String kMainJs = r'''(function () {
         if (models.length === 0) {
             var noModelOpt = document.createElement('option');
             noModelOpt.value = '';
-            noModelOpt.textContent = '(no local models yet -- download one below)';
+            noModelOpt.textContent = '(no local models yet -- pull one below)';
             engineModelSelect.appendChild(noModelOpt);
             engineModelSelect.disabled = true;
         } else {
@@ -1076,13 +1076,13 @@ const String kMainJs = r'''(function () {
             var div = document.createElement('div');
             div.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:4px 0; border-top:1px solid var(--vscode-panel-border);';
             var info = document.createElement('div');
-            info.innerHTML = '<span style="font-size:12px;">' + m.name + '</span><br><span style="font-size:10px; color:var(--vscode-descriptionForeground);">' + (m.sizeHint || '') + '</span>';
+            info.innerHTML = '<span style="font-size:12px;">' + m.name + '</span><br><span style="font-size:10px; color:var(--vscode-descriptionForeground);">' + (m.tag || '') + '</span>';
             var dlBtn = document.createElement('button');
             dlBtn.className = 'action-btn';
             dlBtn.style.cssText = 'padding:3px 10px; font-size:11px; white-space:nowrap;';
-            dlBtn.textContent = '\u2B07 Download';
+            dlBtn.textContent = '\u2B07 Pull';
             dlBtn.addEventListener('click', function () {
-                ws.send(JSON.stringify({ type: 'downloadModel', url: m.url, filename: m.filename }));
+                ws.send(JSON.stringify({ type: 'downloadModel', tag: m.tag }));
             });
             div.appendChild(info);
             div.appendChild(dlBtn);

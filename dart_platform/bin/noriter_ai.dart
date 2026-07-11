@@ -3,17 +3,17 @@ import 'dart:io';
 
 import 'package:noriter_ai_desktop/src/config.dart';
 import 'package:noriter_ai_desktop/src/engine_state.dart';
-import 'package:noriter_ai_desktop/src/llama_engine_manager.dart';
+import 'package:noriter_ai_desktop/src/ollama_engine_manager.dart';
 import 'package:noriter_ai_desktop/src/server.dart';
 
 Future<void> main(List<String> args) async {
   final workspacePath = _resolveWorkspace(args);
   final config = AppConfig.fromEnvironment(workspacePath: workspacePath);
-  final engineManager = LlamaEngineManager();
+  final engineManager = OllamaEngineManager();
 
   stdout.writeln('Noriter AI Desktop');
   stdout.writeln('Workspace: $workspacePath');
-  stdout.writeln('Mode: ${config.engineMode == EngineMode.embedded ? "embedded (llama.cpp)" : "external (${config.modelEndpoint})"}');
+  stdout.writeln('Mode: ${config.engineMode == EngineMode.embedded ? "embedded (Ollama)" : "external (${config.modelEndpoint})"}');
   stdout.writeln('Starting server on port ${config.port}...');
 
   final server = NoriterServer(config: config, engineManager: engineManager);
