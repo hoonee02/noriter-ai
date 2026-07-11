@@ -38,8 +38,32 @@ const String kChatHtml = r'''<!DOCTYPE html>
             <button id="open-goal-btn" class="goal-btn" title="Open Goal File">Goal</button>
             <button id="open-memory-btn" class="memory-btn" title="Open Memory File">Memory</button>
             <button id="engine-btn" class="engine-btn" title="LLM Engine Manager">Engine</button>
+            <button id="telegram-btn" class="engine-btn" title="Telegram Bot Bridge">Telegram</button>
             <button id="clear-history-btn" class="clear-btn" title="Clear History">Clear</button>
         </header>
+
+        <!-- Telegram Panel -->
+        <div id="telegram-panel" style="display:none; padding:10px 14px; background:rgba(0,0,0,0.2); border-bottom:1px solid var(--vscode-panel-border); font-size:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <strong>&#128172; Telegram Bot Bridge</strong>
+                <button id="telegram-panel-close" style="background:transparent;border:none;color:var(--vscode-descriptionForeground);cursor:pointer;font-size:14px;">&#10005;</button>
+            </div>
+            <div id="telegram-status-text" style="margin-bottom:8px; color:var(--vscode-descriptionForeground);">Loading status...</div>
+            <div style="margin-bottom:6px;">
+                <label for="telegram-bot-token" style="display:block; margin-bottom:2px; font-weight:600;">Bot Token</label>
+                <input type="password" id="telegram-bot-token" placeholder="From @BotFather" style="width:100%; box-sizing:border-box; padding:4px 6px; background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border); border-radius:3px;">
+            </div>
+            <div style="margin-bottom:6px;">
+                <label for="telegram-chat-id" style="display:block; margin-bottom:2px; font-weight:600;">Chat ID</label>
+                <input type="text" id="telegram-chat-id" placeholder="e.g. 123456789" style="width:100%; box-sizing:border-box; padding:4px 6px; background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border); border-radius:3px;">
+            </div>
+            <div style="display:flex; align-items:center; gap:6px; margin-bottom:10px;">
+                <input type="checkbox" id="telegram-enabled">
+                <label for="telegram-enabled">Enable Telegram bridge</label>
+            </div>
+            <button id="telegram-save-btn" class="action-btn">Save &amp; Apply</button>
+            <div style="color:var(--vscode-descriptionForeground); font-size:10px; margin-top:8px;">Create a bot with @BotFather, message it once, then get your chat ID from @userinfobot. The token is stored locally in .noriter-ai/telegram-config.json and never shown back in full.</div>
+        </div>
 
         <!-- Engine Panel -->
         <div id="engine-panel" style="display:none; padding:10px 14px; background:rgba(0,0,0,0.2); border-bottom:1px solid var(--vscode-panel-border); font-size:12px; max-height:300px; overflow-y:auto;">
@@ -48,6 +72,14 @@ const String kChatHtml = r'''<!DOCTYPE html>
                 <button id="engine-panel-close" style="background:transparent;border:none;color:var(--vscode-descriptionForeground);cursor:pointer;font-size:14px;">&#10005;</button>
             </div>
             <div id="engine-status-text" style="margin-bottom:8px; color:var(--vscode-descriptionForeground);">Loading status...</div>
+            <div style="margin-bottom:10px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+                    <label for="context-size-slider" style="font-weight:600;">Context Size</label>
+                    <span id="context-size-value" style="color:var(--vscode-descriptionForeground);">4096 tokens</span>
+                </div>
+                <input type="range" id="context-size-slider" min="512" max="32768" step="512" value="4096" style="width:100%;">
+                <div style="color:var(--vscode-descriptionForeground); font-size:10px; margin-top:2px;">Applied the next time you start the engine. Larger values use more RAM.</div>
+            </div>
             <div id="engine-actions" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;"></div>
             <div id="local-models-section" style="margin-bottom:10px;">
                 <div style="font-weight:600; margin-bottom:4px;">Local Models</div>
@@ -418,6 +450,16 @@ const String kMainJs = r'''(function () {
     const engineActions = document.getElementById('engine-actions');
     const localModelsList = document.getElementById('local-models-list');
     const recommendedModelsList = document.getElementById('recommended-models-list');
+    const contextSizeSlider = document.getElementById('context-size-slider');
+    const contextSizeValue = document.getElementById('context-size-value');
+    const telegramBtn = document.getElementById('telegram-btn');
+    const telegramPanel = document.getElementById('telegram-panel');
+    const telegramPanelClose = document.getElementById('telegram-panel-close');
+    const telegramStatusText = document.getElementById('telegram-status-text');
+    const telegramBotToken = document.getElementById('telegram-bot-token');
+    const telegramChatId = document.getElementById('telegram-chat-id');
+    const telegramEnabled = document.getElementById('telegram-enabled');
+    const telegramSaveBtn = document.getElementById('telegram-save-btn');
 
     let currentLogBlock = null;
     let ws = null;
@@ -425,6 +467,16 @@ const String kMainJs = r'''(function () {
     let engineReady = false;  // tracks whether embedded engine is running
     let engineInstalled = false;
     let engineMode = 'embedded';
+
+    if (contextSizeSlider && contextSizeValue) {
+        contextSizeSlider.addEventListener('input', function () {
+            contextSizeValue.textContent = contextSizeSlider.value + ' tokens';
+        });
+    }
+
+    function getSelectedContextSize() {
+        return contextSizeSlider ? parseInt(contextSizeSlider.value, 10) : 4096;
+    }
 
     // Banner shown when engine is not ready
     var engineBanner = document.createElement('div');
@@ -512,9 +564,16 @@ const String kMainJs = r'''(function () {
                     updateEngineActions(message);
                     updateLocalModels(message.localModels || []);
                     updateRecommendedModels(message.recommendedModels || []);
+                    if (contextSizeSlider && contextSizeValue && message.state && message.state.contextSize) {
+                        contextSizeSlider.value = message.state.contextSize;
+                        contextSizeValue.textContent = message.state.contextSize + ' tokens';
+                    }
                     break;
                 case 'localModelsList':
                     updateLocalModels(message.models || []);
+                    break;
+                case 'telegramStatus':
+                    updateTelegramPanel(message);
                     break;
                 case 'engineNotReady':
                     var bannerDiv = document.createElement('div');
@@ -566,6 +625,32 @@ const String kMainJs = r'''(function () {
 
     enginePanelClose.addEventListener('click', function () {
         enginePanel.style.display = 'none';
+    });
+
+    telegramBtn.addEventListener('click', function () {
+        telegramPanel.style.display = telegramPanel.style.display === 'none' ? 'block' : 'none';
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'getTelegramStatus' }));
+        }
+    });
+
+    telegramPanelClose.addEventListener('click', function () {
+        telegramPanel.style.display = 'none';
+    });
+
+    telegramSaveBtn.addEventListener('click', function () {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        var payload = {
+            type: 'updateTelegramConfig',
+            chatId: telegramChatId.value.trim(),
+            enabled: telegramEnabled.checked
+        };
+        var tokenInput = telegramBotToken.value.trim();
+        if (tokenInput) {
+            payload.botToken = tokenInput;
+        }
+        ws.send(JSON.stringify(payload));
+        telegramBotToken.value = '';
     });
 
     sendButton.addEventListener('click', function () {
@@ -735,10 +820,24 @@ const String kMainJs = r'''(function () {
             runBtn.textContent = '\u25B6\uFE0F Run: ' + models[0].split('/').pop().split('\\').pop();
             runBtn.disabled = isBusy;
             runBtn.addEventListener('click', function () {
-                ws.send(JSON.stringify({ type: 'startEngine', modelPath: models[0] }));
+                ws.send(JSON.stringify({ type: 'startEngine', modelPath: models[0], contextSize: getSelectedContextSize() }));
             });
             engineActions.appendChild(runBtn);
         }
+    }
+
+    function updateTelegramPanel(msg) {
+        if (!telegramStatusText) return;
+        var cfg = msg.config || {};
+        var running = !!msg.running;
+        telegramStatusText.textContent = (running ? '✅ Running — ' : '⚪ Stopped — ') + (msg.statusMessage || '');
+        if (document.activeElement !== telegramChatId) {
+            telegramChatId.value = cfg.chatId || '';
+        }
+        if (document.activeElement !== telegramBotToken) {
+            telegramBotToken.placeholder = cfg.botTokenSet ? ('Saved: ' + cfg.botTokenPreview + ' (enter to replace)') : 'From @BotFather';
+        }
+        telegramEnabled.checked = !!cfg.enabled;
     }
 
     function updateLocalModels(models) {
@@ -763,7 +862,7 @@ const String kMainJs = r'''(function () {
                     ws.send(JSON.stringify({ type: 'downloadEngine' }));
                     return;
                 }
-                ws.send(JSON.stringify({ type: 'startEngine', modelPath: m }));
+                ws.send(JSON.stringify({ type: 'startEngine', modelPath: m, contextSize: getSelectedContextSize() }));
                 enginePanel.style.display = 'none';
             });
             div.appendChild(runBtn);

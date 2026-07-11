@@ -9,6 +9,7 @@ class EngineState {
     this.statusMessage,
     this.activeModelPath,
     this.serverPort,
+    this.contextSize = 4096,
   });
 
   EngineMode mode;
@@ -16,6 +17,7 @@ class EngineState {
   String? statusMessage;
   String? activeModelPath;
   int? serverPort;
+  int contextSize;
 
   Map<String, dynamic> toJson() => {
         'mode': mode.name,
@@ -23,5 +25,6 @@ class EngineState {
         'statusMessage': statusMessage,
         'activeModelPath': activeModelPath,
         'serverPort': serverPort,
+        'contextSize': contextSize,
       };
 }

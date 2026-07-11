@@ -13,3 +13,6 @@ dist/
 # VS Code test outputs
 .vscode-test/
 .history/
+
+# Local secrets
+.noriter-ai/telegram-config.json

@@ -12,6 +12,7 @@ class LlamaEngineManager {
   Process? _serverProcess;
   int? _activePort;
   String? _activeModelPath;
+  int? _activeContextSize;
 
   String get _appDataDir {
     return Platform.environment['APPDATA'] ??
@@ -30,6 +31,7 @@ class LlamaEngineManager {
   bool get isInstalled => _findServerExecutablePath() != null;
   int? get activePort => _activePort;
   String? get activeModelPath => _activeModelPath;
+  int? get activeContextSize => _activeContextSize;
 
   /// Downloads llama.cpp Windows x64 CPU build from GitHub releases, extracts
   /// llama-server.exe and all DLLs to [engineDir].
@@ -189,7 +191,11 @@ class LlamaEngineManager {
 
   /// Starts llama-server.exe with the given model. Polls /health until ready
   /// (timeout: 30s).
-  Future<Process> startServer(String modelPath, {int port = 8080}) async {
+  Future<Process> startServer(
+    String modelPath, {
+    int port = 8080,
+    int contextSize = 4096,
+  }) async {
     final resolvedExe = _findServerExecutablePath();
     if (resolvedExe == null) {
       throw Exception(
@@ -200,10 +206,11 @@ class LlamaEngineManager {
 
     _activePort = port;
     _activeModelPath = modelPath;
+    _activeContextSize = contextSize;
 
     final process = await Process.start(
       resolvedExe,
-      ['-m', modelPath, '--port', '$port', '--host', '127.0.0.1', '-c', '4096', '-ngl', '0'],
+      ['-m', modelPath, '--port', '$port', '--host', '127.0.0.1', '-c', '$contextSize', '-ngl', '0'],
       workingDirectory: File(resolvedExe).parent.path,
     );
     _serverProcess = process;
@@ -238,6 +245,7 @@ class LlamaEngineManager {
     }
     _activePort = null;
     _activeModelPath = null;
+    _activeContextSize = null;
   }
 
   /// Lists .gguf files in [modelsDir].

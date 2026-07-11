@@ -159,6 +159,21 @@ If no tool is needed, return "Final Answer:" immediately.
         );
 
         if (response.statusCode < 200 || response.statusCode >= 300) {
+          if (response.statusCode == 400 && _isContextSizeExceeded(response.body)) {
+            if (messages.length > 2) {
+              // Drop the oldest message pair and retry with a shorter context.
+              messages.removeAt(0);
+              if (messages.isNotEmpty) {
+                messages.removeAt(0);
+              }
+              iteration--;
+              continue;
+            }
+            progress.onError(
+              'The conversation is too long for the model\'s context window, even after trimming history. Try starting a new chat or increasing the context size in the engine settings.',
+            );
+            return;
+          }
           progress.onError('API Error ${response.statusCode}: ${response.body}');
           return;
         }
@@ -283,6 +298,21 @@ If no tool is needed, return "Final Answer:" immediately.
     }
     progress.onError('Maximum iterations reached without a final answer.');
   }
+}
+
+bool _isContextSizeExceeded(String responseBody) {
+  try {
+    final decoded = jsonDecode(responseBody);
+    if (decoded is Map<String, dynamic>) {
+      final error = decoded['error'];
+      if (error is Map<String, dynamic> && error['type'] == 'exceed_context_size_error') {
+        return true;
+      }
+    }
+  } catch (_) {
+    // Fall through to substring check below.
+  }
+  return responseBody.contains('exceed_context_size_error');
 }
 
 List<Map<String, String>> _normalizeAlternatingMessages(

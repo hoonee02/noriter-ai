@@ -17,6 +17,8 @@ import 'package:noriter_ai_desktop/src/memory_service.dart';
 import 'package:noriter_ai_desktop/src/goal_service.dart';
 import 'package:noriter_ai_desktop/src/model_download_service.dart';
 import 'package:noriter_ai_desktop/src/model_provider.dart';
+import 'package:noriter_ai_desktop/src/telegram_bridge.dart';
+import 'package:noriter_ai_desktop/src/telegram_config_service.dart';
 
 class NoriterServer {
   NoriterServer({required this.config, required this.engineManager});
@@ -29,6 +31,11 @@ class NoriterServer {
   late final GoalService _goal;
   late LocalAgent _agent;
   late OpenAiCompatibleModelProvider _provider;
+
+  late final TelegramConfigService _telegramConfigService;
+  late TelegramConfig _telegramConfig;
+  late final TelegramBridge _telegramBridge;
+  String _telegramStatusMessage = 'Not configured.';
 
   final Set<WebSocketChannel> _clients = {};
   bool _cancelled = false;
@@ -53,6 +60,19 @@ class NoriterServer {
 
     await _history.load();
     _goal.ensureGoalFile();
+
+    _telegramConfigService = TelegramConfigService(workspaceRoot: config.workspacePath);
+    _telegramConfig = await _telegramConfigService.load();
+    _telegramBridge = TelegramBridge(
+      onMessage: _runAgentForTelegram,
+      onStatus: (status) {
+        _telegramStatusMessage = status;
+        _broadcastTelegramStatus();
+      },
+    );
+    if (_telegramConfig.enabled) {
+      _telegramBridge.start(_telegramConfig.botToken, _telegramConfig.chatId);
+    }
 
     final handler = const Pipeline()
         .addMiddleware(_corsMiddleware())
@@ -133,6 +153,8 @@ class NoriterServer {
       'activeModelPath': engineManager.activeModelPath,
     });
 
+    _sendTo(channel, _telegramStatusPayload());
+
     channel.stream.listen(
       (data) async {
         try {
@@ -207,8 +229,12 @@ class NoriterServer {
 
       case 'startEngine':
         final modelPath = msg['modelPath'] as String?;
+        final requestedContextSize = msg['contextSize'];
+        final contextSize = requestedContextSize is int
+            ? requestedContextSize.clamp(512, 32768)
+            : _engineState.contextSize;
         if (modelPath != null && modelPath.isNotEmpty) {
-          unawaited(_runStartEngine(modelPath));
+          unawaited(_runStartEngine(modelPath, contextSize));
         }
         break;
 
@@ -223,7 +249,101 @@ class NoriterServer {
           unawaited(_runDownloadModel(url, filename));
         }
         break;
+
+      case 'getTelegramStatus':
+        _sendTo(channel, _telegramStatusPayload());
+        break;
+
+      case 'updateTelegramConfig':
+        unawaited(_runUpdateTelegramConfig(msg));
+        break;
     }
+  }
+
+  Map<String, dynamic> _telegramStatusPayload() => {
+        'type': 'telegramStatus',
+        'config': _telegramConfig.toPublicJson(),
+        'running': _telegramBridge.isRunning,
+        'statusMessage': _telegramStatusMessage,
+      };
+
+  void _broadcastTelegramStatus() {
+    _broadcast(_telegramStatusPayload());
+  }
+
+  Future<void> _runUpdateTelegramConfig(Map<String, dynamic> msg) async {
+    final botToken = msg['botToken'];
+    final chatId = msg['chatId'];
+    final enabled = msg['enabled'];
+
+    if (botToken is String && botToken.trim().isNotEmpty) {
+      _telegramConfig.botToken = botToken.trim();
+    }
+    if (chatId is String) {
+      _telegramConfig.chatId = chatId.trim();
+    }
+    if (enabled is bool) {
+      _telegramConfig.enabled = enabled;
+    }
+    await _telegramConfigService.save(_telegramConfig);
+
+    _telegramBridge.stop();
+    if (_telegramConfig.enabled) {
+      _telegramBridge.start(_telegramConfig.botToken, _telegramConfig.chatId);
+    } else {
+      _telegramStatusMessage = 'Telegram bridge disabled.';
+    }
+    _broadcastTelegramStatus();
+  }
+
+  /// Runs the shared agent for a Telegram-originated message. Reuses the same
+  /// history/agent as the web chat so both surfaces stay in sync, and returns
+  /// the final answer text to send back to the Telegram chat.
+  Future<String> _runAgentForTelegram(String message) async {
+    if (config.engineMode == EngineMode.embedded &&
+        _engineState.status != EngineStatus.ready) {
+      return engineManager.isInstalled
+          ? 'Engine is installed but not running. Open the app and start the engine from the [Engine] panel.'
+          : 'No LLM engine found. Open the app and download the engine from the [Engine] panel.';
+    }
+
+    _cancelled = false;
+    await _history.append('user', message);
+    _broadcast({'type': 'sessionStart', 'userPrompt': message});
+
+    final contextMessages = _history.buildContextMessages();
+    final completer = Completer<String>();
+
+    try {
+      await _agent.run(
+        message,
+        AgentProgress(
+          onThought: (text) => _broadcast({'type': 'thought', 'value': text}),
+          onToolStart: (name, args) => _broadcast({'type': 'toolStart', 'name': name, 'args': args}),
+          onToolEnd: (name, output) => _broadcast({'type': 'toolEnd', 'name': name, 'output': output}),
+          onFinalAnswer: (text) async {
+            await _history.append('assistant', text);
+            _broadcast({'type': 'finalAnswer', 'value': text});
+            if (!completer.isCompleted) completer.complete(text.isEmpty ? 'Done.' : text);
+          },
+          onError: (err) async {
+            await _history.append('error', err);
+            _broadcast({'type': 'error', 'value': err});
+            if (!completer.isCompleted) completer.complete('Agent error: $err');
+          },
+        ),
+        () => _cancelled,
+        contextMessages,
+      );
+    } catch (e) {
+      final err = e.toString();
+      await _history.append('error', err);
+      _broadcast({'type': 'error', 'value': err});
+      if (!completer.isCompleted) completer.complete('Agent error: $err');
+    }
+
+    if (!completer.isCompleted) completer.complete('Done.');
+    return completer.future;
   }
 
   Future<void> _runDownloadEngine() async {
@@ -241,17 +361,19 @@ class NoriterServer {
     _broadcastEngineStatus();
   }
 
-  Future<void> _runStartEngine(String modelPath) async {
+  Future<void> _runStartEngine(String modelPath, int contextSize) async {
     _engineState.status = EngineStatus.starting;
     _engineState.statusMessage = 'Starting engine...';
     _engineState.activeModelPath = modelPath;
+    _engineState.contextSize = contextSize;
     _broadcastEngineStatus();
     try {
-      await engineManager.startServer(modelPath);
+      await engineManager.startServer(modelPath, contextSize: contextSize);
       _activeEndpoint = 'http://127.0.0.1:${engineManager.activePort}/v1';
       _rebuildAgent();
       _engineState.status = EngineStatus.ready;
       _engineState.serverPort = engineManager.activePort;
+      _engineState.contextSize = engineManager.activeContextSize ?? contextSize;
       _engineState.statusMessage = 'Engine ready! Start chatting.';
     } catch (e) {
       _engineState.status = EngineStatus.error;
