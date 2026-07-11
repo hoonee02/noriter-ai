@@ -163,14 +163,7 @@ class NoriterServer {
     });
 
     // Send engine state immediately on connect
-    _sendTo(channel, {
-      'type': 'engineStatus',
-      'state': _engineState.toJson(),
-      'isInstalled': engineManager.isInstalled,
-      'localModels': engineManager.listLocalModels(),
-      'recommendedModels': ModelDownloadService.recommendedModels,
-      'activeModelPath': engineManager.activeModelPath,
-    });
+    _sendTo(channel, _engineStatusPayload());
 
     _sendTo(channel, _telegramStatusPayload());
 
@@ -206,14 +199,7 @@ class NoriterServer {
     switch (msg['type'] as String?) {
       case 'webviewReady':
         _sendTo(channel, {'type': 'loadHistory', 'entries': _history.getEntries()});
-        _sendTo(channel, {
-          'type': 'engineStatus',
-          'state': _engineState.toJson(),
-          'isInstalled': engineManager.isInstalled,
-          'localModels': engineManager.listLocalModels(),
-          'recommendedModels': ModelDownloadService.recommendedModels,
-          'activeModelPath': engineManager.activeModelPath,
-        });
+        _sendTo(channel, _engineStatusPayload());
         break;
 
       case 'sendMessage':
@@ -246,14 +232,7 @@ class NoriterServer {
         break;
 
       case 'getEngineStatus':
-        _sendTo(channel, {
-          'type': 'engineStatus',
-          'state': _engineState.toJson(),
-          'isInstalled': engineManager.isInstalled,
-          'localModels': engineManager.listLocalModels(),
-          'recommendedModels': ModelDownloadService.recommendedModels,
-          'activeModelPath': engineManager.activeModelPath,
-        });
+        _sendTo(channel, _engineStatusPayload());
         break;
 
       case 'downloadEngine':
@@ -290,6 +269,10 @@ class NoriterServer {
         if (url != null && url.isNotEmpty) {
           unawaited(_runDownloadModel(url, filename));
         }
+        break;
+
+      case 'openModelsFolder':
+        unawaited(_openInFileExplorer(engineManager.modelsDir));
         break;
 
       case 'getTelegramStatus':
@@ -479,14 +462,41 @@ class NoriterServer {
   }
 
   void _broadcastEngineStatus() {
-    _broadcast({
-      'type': 'engineStatus',
-      'state': _engineState.toJson(),
-      'isInstalled': engineManager.isInstalled,
-      'localModels': engineManager.listLocalModels(),
-      'recommendedModels': ModelDownloadService.recommendedModels,
-      'activeModelPath': engineManager.activeModelPath,
-    });
+    _broadcast(_engineStatusPayload());
+  }
+
+  /// The engine that actually runs the LLM: llama.cpp's `llama-server.exe`
+  /// subprocess (embedded mode) or an external OpenAI-compatible server the
+  /// user pointed the app at via NORITER_MODEL_ENDPOINT. Surfaced to the UI
+  /// so "what's running this?" and "where are the model files?" are visible
+  /// instead of implicit.
+  String get _engineBackendLabel => config.engineMode == EngineMode.embedded
+      ? 'llama.cpp (llama-server.exe, embedded)'
+      : 'External OpenAI-compatible server (${config.modelEndpoint})';
+
+  Map<String, dynamic> _engineStatusPayload() => {
+        'type': 'engineStatus',
+        'state': _engineState.toJson(),
+        'isInstalled': engineManager.isInstalled,
+        'localModels': engineManager.listLocalModels(),
+        'recommendedModels': ModelDownloadService.recommendedModels,
+        'activeModelPath': engineManager.activeModelPath,
+        'engineBackend': _engineBackendLabel,
+        'modelsDir': engineManager.modelsDir,
+        'engineDir': engineManager.engineDir,
+      };
+
+  /// Opens a local folder in the OS file explorer (Windows Explorer). Purely
+  /// a UI convenience for "폴더에서 보기" -- failures are non-fatal, just
+  /// surfaced as an engine status message.
+  Future<void> _openInFileExplorer(String path) async {
+    try {
+      await Directory(path).create(recursive: true);
+      await Process.start('explorer', [path]);
+    } catch (e) {
+      _engineState.statusMessage = 'Failed to open folder: $e';
+      _broadcastEngineStatus();
+    }
   }
 
   /// Builds a single user-turn message that embeds a locally attached file's

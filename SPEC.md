@@ -113,6 +113,7 @@ noriter-ai-0.0.9.exe
 | `listLocalModels` | — | List downloaded GGUF models |
 | `getTelegramStatus` | — | Request current Telegram bridge status |
 | `updateTelegramConfig` | `{ botToken?, chatId?, enabled? }` | Save Telegram settings and start/stop the bridge |
+| `openModelsFolder` | — | Opens the local GGUF models folder in Windows Explorer |
 
 ### Server → Client
 
@@ -125,7 +126,7 @@ noriter-ai-0.0.9.exe
 | `toolEnd` | `{ name, output }` | Tool call completed |
 | `finalAnswer` | `{ value }` | Agent final response |
 | `error` | `{ value }` | Error message |
-| `engineStatus` | `{ state, isInstalled, localModels, ... }` | Engine state update (`state.contextSize` included) |
+| `engineStatus` | `{ state, isInstalled, localModels, engineBackend, modelsDir, engineDir, ... }` | Engine state update (`state.contextSize`, `engineBackend` label, and on-disk `modelsDir`/`engineDir` paths included) |
 | `localModelsList` | `{ models }` | List of downloaded models |
 | `telegramStatus` | `{ config, running, statusMessage }` | Telegram bridge state (`config` is redacted — no full token) |
 | `lastEngineFound` | `{ modelPath, contextSize }` | Sent once per app run if a remembered engine exists and none is running yet; frontend shows a confirm dialog before auto-starting it |

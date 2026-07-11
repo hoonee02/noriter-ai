@@ -72,6 +72,7 @@ const String kChatHtml = r'''<!DOCTYPE html>
                 <button id="engine-panel-close" style="background:transparent;border:none;color:var(--vscode-descriptionForeground);cursor:pointer;font-size:14px;">&#10005;</button>
             </div>
             <div id="engine-status-text" class="engine-status-line">Loading status...</div>
+            <div id="engine-backend-text" class="engine-backend-line">&#9881;&#65039; Engine: —</div>
             <div id="engine-model-row" class="engine-model-row">
                 <select id="engine-model-select" class="engine-model-select" disabled>
                     <option value="">(no local models yet)</option>
@@ -87,7 +88,11 @@ const String kChatHtml = r'''<!DOCTYPE html>
                 <div style="color:var(--vscode-descriptionForeground); font-size:10px; margin-top:2px;">Applied the next time you start the engine. Larger values use more RAM.</div>
             </div>
             <div id="local-models-section" style="margin-bottom:10px;">
-                <div style="font-weight:600; margin-bottom:4px;">Local Models</div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <span style="font-weight:600;">Local Models</span>
+                    <button id="open-models-folder-btn" class="action-btn" style="padding:2px 8px; font-size:11px;" title="Open the models folder in File Explorer">&#128193; 폴더에서 보기</button>
+                </div>
+                <div id="engine-models-dir-text" style="color:var(--vscode-descriptionForeground); font-size:10px; margin-bottom:4px; word-break:break-all;"></div>
                 <div id="local-models-list" style="color:var(--vscode-descriptionForeground);">(none)</div>
             </div>
             <div id="recommended-section">
@@ -458,6 +463,12 @@ body {
     text-overflow: ellipsis;
 }
 
+.engine-backend-line {
+    margin-bottom: 8px;
+    color: var(--vscode-descriptionForeground);
+    font-size: 11px;
+}
+
 .engine-model-row {
     display: flex;
     gap: 6px;
@@ -505,6 +516,9 @@ const String kMainJs = r'''(function () {
     const enginePanel = document.getElementById('engine-panel');
     const enginePanelClose = document.getElementById('engine-panel-close');
     const engineStatusText = document.getElementById('engine-status-text');
+    const engineBackendText = document.getElementById('engine-backend-text');
+    const engineModelsDirText = document.getElementById('engine-models-dir-text');
+    const openModelsFolderBtn = document.getElementById('open-models-folder-btn');
     const engineModelSelect = document.getElementById('engine-model-select');
     const engineRunBtn = document.getElementById('engine-run-btn');
     const localModelsList = document.getElementById('local-models-list');
@@ -628,6 +642,12 @@ const String kMainJs = r'''(function () {
                         var statusMsg = message.state ? (message.state.statusMessage || message.state.status) : 'Unknown';
                         engineStatusText.textContent = statusMsg;
                     }
+                    if (engineBackendText && message.engineBackend) {
+                        engineBackendText.textContent = '⚙️ Engine: ' + message.engineBackend;
+                    }
+                    if (engineModelsDirText && message.modelsDir) {
+                        engineModelsDirText.textContent = 'Models folder: ' + message.modelsDir;
+                    }
                     updateEngineModelRow(message);
                     updateLocalModels(message.localModels || []);
                     updateRecommendedModels(message.recommendedModels || []);
@@ -708,6 +728,14 @@ const String kMainJs = r'''(function () {
     enginePanelClose.addEventListener('click', function () {
         enginePanel.style.display = 'none';
     });
+
+    if (openModelsFolderBtn) {
+        openModelsFolderBtn.addEventListener('click', function () {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'openModelsFolder' }));
+            }
+        });
+    }
 
     telegramBtn.addEventListener('click', function () {
         telegramPanel.style.display = telegramPanel.style.display === 'none' ? 'block' : 'none';
