@@ -299,5 +299,10 @@ class OllamaEngineManager {
       'name': 'EXAONE-4.5-33B (LG, image-capable, ⚠ slow on this hardware -- mostly runs on system RAM)',
       'tag': 'hf.co/mradermacher/EXAONE-4.5-33B-i1-GGUF:Q2_K',
     },
+    // A properly hardware-appropriate vision option: 1.8B params, ~1.7GB,
+    // fits a 6GB-VRAM GPU with plenty of headroom and runs fast -- unlike
+    // the 33B EXAONE above, this is actually comfortable to use for quick
+    // image description/analysis on this machine.
+    {'name': 'Moondream-1.8B (tiny, fast, image-capable -- fits comfortably)', 'tag': 'moondream:1.8b'},
   ];
 }

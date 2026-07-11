@@ -5,6 +5,7 @@ See [BUGFIXES.md](BUGFIXES.md) for a detailed, symptom → root cause → fix lo
 ## [Unreleased]
 ### Added
 - **EXAONE-4.5-33B (image-capable)** added to the recommended list for users who specifically want vision analysis from an EXAONE model. LG has no smaller vision-capable EXAONE -- the only image-capable release is 33B. Pulled via `hf.co/mradermacher/EXAONE-4.5-33B-i1-GGUF:Q2_K` (~10GB, the smallest available quant). Labeled with an explicit ⚠ warning: on a 6GB-VRAM GPU it mostly runs on system RAM and will be noticeably slow. `gemma3:4b` remains the fast/comfortable vision option for anyone not specifically tied to EXAONE.
+- **Moondream-1.8B** added as a properly hardware-appropriate vision option (`moondream:1.8b`, ~1.7GB) -- fits a 6GB-VRAM GPU with plenty of headroom and runs fast, for anyone who wants quick image description/analysis without the EXAONE-4.5-33B slowdown.
 
 ### Fixed
 - Attaching an image while a non-vision model was loaded showed a raw JSON API error ("Multimodal data provided, but model does not support multimodal requests"). Now checked upfront via Ollama's `/api/show` capabilities and shown as a clear message telling you to switch to a vision-capable model (e.g. `gemma3:4b`) instead.

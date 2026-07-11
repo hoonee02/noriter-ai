@@ -107,6 +107,7 @@ of a filesystem path -- a much lower-friction "pick a model, click Run" flow.
 | EXAONE-3.5-2.4B-Instruct | `exaone3.5:2.4b` | LG AI Research, light |
 | EXAONE-3.5-7.8B-Instruct | `exaone3.5:7.8b` | LG AI Research, fits a 6GB-VRAM GPU (e.g. GTX 1660) + 32GB RAM comfortably |
 | EXAONE-4.5-33B | `hf.co/mradermacher/EXAONE-4.5-33B-i1-GGUF:Q2_K` | LG's only **image-capable** EXAONE (no smaller vision variant exists). ⚠ Does not fit a 6GB-VRAM GPU -- mostly runs on system RAM and will be slow. Included for users who specifically want EXAONE for vision despite the tradeoff. |
+| Moondream-1.8B | `moondream:1.8b` | Tiny, fast, **image-capable**; fits a 6GB-VRAM GPU comfortably -- the hardware-appropriate vision pick |
 
 ---
 
