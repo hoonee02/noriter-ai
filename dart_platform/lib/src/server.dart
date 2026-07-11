@@ -19,6 +19,7 @@ import 'package:noriter_ai_desktop/src/model_download_service.dart';
 import 'package:noriter_ai_desktop/src/model_provider.dart';
 import 'package:noriter_ai_desktop/src/telegram_bridge.dart';
 import 'package:noriter_ai_desktop/src/telegram_config_service.dart';
+import 'package:noriter_ai_desktop/src/last_engine_service.dart';
 
 class NoriterServer {
   NoriterServer({required this.config, required this.engineManager});
@@ -36,6 +37,10 @@ class NoriterServer {
   late TelegramConfig _telegramConfig;
   late final TelegramBridge _telegramBridge;
   String _telegramStatusMessage = 'Not configured.';
+
+  late final LastEngineService _lastEngineService;
+  LastEngineConfig? _lastEngineConfig;
+  bool _lastEngineOffered = false;
 
   final Set<WebSocketChannel> _clients = {};
   bool _cancelled = false;
@@ -77,6 +82,12 @@ class NoriterServer {
     );
     if (_telegramConfig.enabled) {
       _telegramBridge.start(_telegramConfig.botToken, _telegramConfig.chatId);
+    }
+
+    _lastEngineService = LastEngineService(workspaceRoot: config.workspacePath);
+    _lastEngineConfig = await _lastEngineService.load();
+    if (_lastEngineConfig != null && !File(_lastEngineConfig!.modelPath).existsSync()) {
+      _lastEngineConfig = null;
     }
 
     final handler = const Pipeline()
@@ -160,6 +171,19 @@ class NoriterServer {
 
     _sendTo(channel, _telegramStatusPayload());
 
+    if (!_lastEngineOffered &&
+        _lastEngineConfig != null &&
+        _engineState.status != EngineStatus.ready &&
+        _engineState.status != EngineStatus.starting) {
+      _lastEngineOffered = true;
+      final cfg = _lastEngineConfig!;
+      _sendTo(channel, {
+        'type': 'lastEngineFound',
+        'modelPath': cfg.modelPath,
+        'contextSize': cfg.contextSize,
+      });
+    }
+
     channel.stream.listen(
       (data) async {
         try {
@@ -190,8 +214,15 @@ class NoriterServer {
 
       case 'sendMessage':
         final value = msg['value'] as String?;
-        if (value != null && value.trim().isNotEmpty) {
-          await _handleSendMessage(value.trim());
+        final attachment = msg['attachment'];
+        String? finalValue = value;
+        if (attachment is Map<String, dynamic>) {
+          final fileName = (attachment['name'] as String?) ?? 'file';
+          final content = (attachment['content'] as String?) ?? '';
+          finalValue = _composeMessageWithAttachment(value, fileName, content);
+        }
+        if (finalValue != null && finalValue.trim().isNotEmpty) {
+          await _handleSendMessage(finalValue.trim());
         }
         break;
 
@@ -386,6 +417,8 @@ class NoriterServer {
       _engineState.serverPort = engineManager.activePort;
       _engineState.contextSize = engineManager.activeContextSize ?? contextSize;
       _engineState.statusMessage = 'Engine ready! Start chatting.';
+      _lastEngineConfig = LastEngineConfig(modelPath: modelPath, contextSize: _engineState.contextSize);
+      unawaited(_lastEngineService.save(_lastEngineConfig!));
     } catch (e) {
       _engineState.status = EngineStatus.error;
       _engineState.statusMessage = 'Engine start failed: $e';
@@ -445,6 +478,20 @@ class NoriterServer {
       'recommendedModels': ModelDownloadService.recommendedModels,
       'activeModelPath': engineManager.activeModelPath,
     });
+  }
+
+  /// Builds a single user-turn message that embeds a locally attached file's
+  /// text content alongside whatever the user typed, so the agent can process
+  /// it like any other conversation turn.
+  String _composeMessageWithAttachment(String? userText, String fileName, String content) {
+    const maxChars = 8000;
+    final truncated = content.length > maxChars;
+    final body = truncated ? content.substring(0, maxChars) : content;
+    final notice = truncated ? '\n\n(File truncated to $maxChars characters)' : '';
+    final prompt = (userText != null && userText.trim().isNotEmpty)
+        ? userText.trim()
+        : 'Please review the attached file.';
+    return '$prompt\n\n[Attached file: $fileName]\n```\n$body\n```$notice';
   }
 
   Future<void> _handleSendMessage(String message) async {

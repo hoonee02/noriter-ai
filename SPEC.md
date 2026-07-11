@@ -11,7 +11,7 @@ The app is distributed as a single EXE (`noriter-ai-0.0.x.exe`, ~7–8 MB) with 
 ## Architecture
 
 ```
-noriter-ai-0.0.8.exe
+noriter-ai-0.0.9.exe
 └── Dart AOT binary (single file, no runtime dependency)
     ├── HTTP server  (shelf)  → localhost:3742
     │   ├── GET  /          → embedded HTML (chat UI)
@@ -40,6 +40,15 @@ noriter-ai-0.0.8.exe
     │   ├── Auto-binds to the first chat that messages the bot if no chat ID is configured
     │   ├── Routes messages through the same LocalAgent/history as the web chat
     │   └── Settings persisted to .noriter-ai/telegram-config.json (gitignored)
+    │
+    ├── Local file attachment (chat UI)
+    │   ├── Paperclip button reads a local text file client-side (FileReader, max 500 KB)
+    │   └── Content is embedded in the next chat message sent to the agent
+    │
+    ├── LastEngineService
+    │   ├── Remembers the last model path + context size that started successfully
+    │   ├── Persisted to .noriter-ai/last-engine.json
+    │   └── On next launch, offers a confirm dialog to auto-relaunch it if the file still exists
     │
     └── Services
         ├── HistoryService   → .noriter-ai/chat-history.json
@@ -91,7 +100,7 @@ noriter-ai-0.0.8.exe
 
 | `type` | Payload | Action |
 |--------|---------|--------|
-| `sendMessage` | `{ value: string }` | Run agent with user message |
+| `sendMessage` | `{ value: string, attachment?: { name, content } }` | Run agent with user message, optionally embedding an attached local file's text content |
 | `stopAgent` | — | Cancel current agent run |
 | `clearHistory` | — | Clear chat history |
 | `downloadEngine` | — | Download llama-server.exe |
@@ -116,13 +125,14 @@ noriter-ai-0.0.8.exe
 | `engineStatus` | `{ state, isInstalled, localModels, ... }` | Engine state update (`state.contextSize` included) |
 | `localModelsList` | `{ models }` | List of downloaded models |
 | `telegramStatus` | `{ config, running, statusMessage }` | Telegram bridge state (`config` is redacted — no full token) |
+| `lastEngineFound` | `{ modelPath, contextSize }` | Sent once per app run if a remembered engine exists and none is running yet; frontend shows a confirm dialog before auto-starting it |
 
 ---
 
 ## File Layout
 
 ```
-noriter-ai-0.0.8.exe          ← Standalone Windows EXE (no installer needed)
+noriter-ai-0.0.9.exe          ← Standalone Windows EXE (no installer needed)
 CHANGELOG.md                   ← Version history
 SPEC.md                        ← This file
 
@@ -143,6 +153,7 @@ dart_platform/                 ← Dart source code
     model_provider.dart        ← OpenAI-compatible HTTP client
     telegram_bridge.dart       ← Telegram Bot API long-polling bridge
     telegram_config_service.dart← Telegram bot token / chat ID persistence
+    last_engine_service.dart   ← Remembers last-started model + context size
     agent_app.dart             ← (legacy CLI bootstrap, superseded by server.dart)
     plan_logger.dart           ← Appends to project-plan-log.md
 
@@ -158,6 +169,7 @@ src/                           ← Legacy VS Code extension (TypeScript, v0.0.5)
   agent-goal.md
   project-plan-log.md
   telegram-config.json         ← Bot token / chat ID (gitignored, contains secrets)
+  last-engine.json             ← Last-started model path + context size
 ```
 
 ---
@@ -166,14 +178,14 @@ src/                           ← Legacy VS Code extension (TypeScript, v0.0.5)
 
 ```batch
 REM Just double-click or run from terminal:
-noriter-ai-0.0.8.exe
+noriter-ai-0.0.9.exe
 
 REM Optionally specify a workspace path:
-noriter-ai-0.0.8.exe C:\MyProject
+noriter-ai-0.0.9.exe C:\MyProject
 
 REM Use external LLM (e.g. LM Studio on port 1234):
 set NORITER_MODEL_ENDPOINT=http://localhost:1234/v1
-noriter-ai-0.0.8.exe
+noriter-ai-0.0.9.exe
 ```
 
 The app opens `http://localhost:3742` in your default browser automatically.
@@ -187,5 +199,5 @@ Requires [Dart SDK](https://dart.dev/get-dart) 3.3+.
 ```batch
 cd dart_platform
 dart pub get
-dart compile exe bin/noriter_ai.dart -o ..\noriter-ai-0.0.8.exe
+dart compile exe bin/noriter_ai.dart -o ..\noriter-ai-0.0.9.exe
 ```

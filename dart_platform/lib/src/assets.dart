@@ -101,7 +101,14 @@ const String kChatHtml = r'''<!DOCTYPE html>
             <button id="stop-btn" class="stop-btn">Stop</button>
         </div>
 
+        <div id="attachment-chip" style="display:none; align-items:center; gap:6px; padding:4px 14px; font-size:11px; color:var(--vscode-descriptionForeground);">
+            <span>&#128206;</span>
+            <span id="attachment-chip-name"></span>
+            <button id="attachment-remove-btn" style="background:transparent; border:none; color:var(--vscode-descriptionForeground); cursor:pointer;">&#10005;</button>
+        </div>
         <div class="chat-input-area">
+            <input type="file" id="file-input" style="display:none;" accept=".txt,.md,.markdown,.json,.csv,.log,.js,.ts,.dart,.py,.java,.c,.cpp,.h,.html,.css,.yaml,.yml,.xml,.ini,.env">
+            <button id="attach-btn" title="Attach a local file">&#128206;</button>
             <textarea id="chat-input" placeholder="Send a message to the local AI agent..." rows="2"></textarea>
             <button id="send-btn">Send</button>
         </div>
@@ -460,6 +467,13 @@ const String kMainJs = r'''(function () {
     const telegramChatId = document.getElementById('telegram-chat-id');
     const telegramEnabled = document.getElementById('telegram-enabled');
     const telegramSaveBtn = document.getElementById('telegram-save-btn');
+    const attachBtn = document.getElementById('attach-btn');
+    const fileInput = document.getElementById('file-input');
+    const attachmentChip = document.getElementById('attachment-chip');
+    const attachmentChipName = document.getElementById('attachment-chip-name');
+    const attachmentRemoveBtn = document.getElementById('attachment-remove-btn');
+    let pendingAttachment = null;
+    const MAX_ATTACHMENT_BYTES = 500 * 1024;
 
     let currentLogBlock = null;
     let ws = null;
@@ -575,6 +589,21 @@ const String kMainJs = r'''(function () {
                 case 'telegramStatus':
                     updateTelegramPanel(message);
                     break;
+                case 'lastEngineFound':
+                    var modelLabel = message.modelPath.split('/').pop().split('\\').pop();
+                    var confirmed = window.confirm(
+                        'Automatically start the last used engine?\n\n' +
+                        'Model: ' + modelLabel + '\n' +
+                        'Context size: ' + message.contextSize + ' tokens'
+                    );
+                    if (confirmed && ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'startEngine', modelPath: message.modelPath, contextSize: message.contextSize }));
+                        if (contextSizeSlider && contextSizeValue) {
+                            contextSizeSlider.value = message.contextSize;
+                            contextSizeValue.textContent = message.contextSize + ' tokens';
+                        }
+                    }
+                    break;
                 case 'engineNotReady':
                     var bannerDiv = document.createElement('div');
                     bannerDiv.className = 'error-message';
@@ -685,11 +714,50 @@ const String kMainJs = r'''(function () {
         alert('Edit goal file directly: .noriter-ai/agent-goal.md');
     });
 
+    attachBtn.addEventListener('click', function () {
+        fileInput.click();
+    });
+
+    fileInput.addEventListener('change', function () {
+        var file = fileInput.files && fileInput.files[0];
+        fileInput.value = '';
+        if (!file) return;
+        if (file.size > MAX_ATTACHMENT_BYTES) {
+            alert('File too large (' + (file.size / 1024).toFixed(0) + ' KB). Max ' + (MAX_ATTACHMENT_BYTES / 1024) + ' KB for attachments.');
+            return;
+        }
+        var reader = new FileReader();
+        reader.onload = function () {
+            pendingAttachment = { name: file.name, content: String(reader.result) };
+            attachmentChipName.textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
+            attachmentChip.style.display = 'flex';
+        };
+        reader.onerror = function () {
+            alert('Failed to read file: ' + file.name);
+        };
+        reader.readAsText(file);
+    });
+
+    attachmentRemoveBtn.addEventListener('click', function () {
+        clearAttachment();
+    });
+
+    function clearAttachment() {
+        pendingAttachment = null;
+        attachmentChip.style.display = 'none';
+        attachmentChipName.textContent = '';
+    }
+
     function sendMessage() {
         var text = chatInput.value.trim();
-        if (text && ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'sendMessage', value: text }));
+        if ((text || pendingAttachment) && ws && ws.readyState === WebSocket.OPEN) {
+            var payload = { type: 'sendMessage', value: text };
+            if (pendingAttachment) {
+                payload.attachment = pendingAttachment;
+            }
+            ws.send(JSON.stringify(payload));
             chatInput.value = '';
+            clearAttachment();
         }
     }
 

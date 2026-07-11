@@ -1,5 +1,10 @@
 # Noriter AI - Changelog
 
+## [0.0.9] - 2026-07-11
+### Added
+- **Local file attachment in chat**: new paperclip button next to the chat input lets you attach a local text-based file (txt, md, json, csv, code, log, etc., up to 500 KB); its content is read client-side and embedded in the next message sent to the agent, so it can review/summarize/edit it like any other conversation turn
+- **Remember last engine + confirm-to-relaunch**: the app now remembers the last model + context size that was successfully started (`.noriter-ai/last-engine.json`). On the next launch, if that model file still exists and no engine is running yet, a confirmation dialog offers to start it automatically
+
 ## [0.0.8] - 2026-07-11
 ### Added
 - **Telegram bot bridge** (`telegram_bridge.dart`, `telegram_config_service.dart`): long-polls the Telegram Bot API and routes messages through the same `LocalAgent`/history used by the web chat, so both surfaces stay in sync
