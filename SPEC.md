@@ -13,7 +13,7 @@ See also: [CHANGELOG.md](CHANGELOG.md) for release history, [BUGFIXES.md](BUGFIX
 ## Architecture
 
 ```
-noriter-ai-0.1.0.exe
+noriter-ai-0.1.1.exe
 └── Dart AOT binary (single file, no runtime dependency)
     ├── HTTP server  (shelf)  → localhost:3742
     │   ├── GET  /          → embedded HTML (chat UI)
@@ -44,9 +44,12 @@ noriter-ai-0.1.0.exe
     │   ├── Routes messages through the same LocalAgent/history as the web chat
     │   └── Settings persisted to .noriter-ai/telegram-config.json (gitignored)
     │
-    ├── Local file attachment (chat UI)
+    ├── Local file/image attachment (chat UI)
     │   ├── Paperclip button reads a local text file client-side (FileReader, max 500 KB)
-    │   └── Content is embedded in the next chat message sent to the agent
+    │   │   and embeds its content in the next chat message
+    │   └── Also accepts images (png/jpg/jpeg/gif/webp, max 4MB) via readAsDataURL,
+    │       sent as a multimodal message part -- requires a vision-capable model
+    │       (e.g. gemma3:4b; smaller Gemma 3 sizes and most other models are text-only)
     │
     ├── LastEngineService
     │   ├── Remembers the last model path + context size that started successfully
@@ -99,8 +102,10 @@ of a filesystem path -- a much lower-friction "pick a model, click Run" flow.
 |-------|-----------|-------|
 | Gemma-3-1B-Instruct | `gemma3:1b` | Fastest, low RAM |
 | Llama-3.2-1B-Instruct | `llama3.2:1b` | Alternative to Gemma-3-1B |
-| Gemma-3-4B-Instruct | `gemma3:4b` | Best overall quality/speed |
+| Gemma-3-4B-Instruct | `gemma3:4b` | Best overall quality/speed; **image-capable** (vision) |
 | Phi-3-mini | `phi3:mini` | Quality alternative |
+| EXAONE-3.5-2.4B-Instruct | `exaone3.5:2.4b` | LG AI Research, light |
+| EXAONE-3.5-7.8B-Instruct | `exaone3.5:7.8b` | LG AI Research, fits a 6GB-VRAM GPU (e.g. GTX 1660) + 32GB RAM comfortably |
 
 ---
 
@@ -110,7 +115,7 @@ of a filesystem path -- a much lower-friction "pick a model, click Run" flow.
 
 | `type` | Payload | Action |
 |--------|---------|--------|
-| `sendMessage` | `{ value: string, attachment?: { name, content } }` | Run agent with user message, optionally embedding an attached local file's text content |
+| `sendMessage` | `{ value: string, attachment?: { name, content, isImage? } }` | Run agent with user message, optionally embedding an attached local file's text content or (if `isImage`, with `content` as a base64 data URL) sending it as a multimodal image part |
 | `stopAgent` | — | Cancel current agent run |
 | `clearHistory` | — | Clear chat history |
 | `downloadEngine` | — | If Ollama isn't installed, opens its download page in the browser; if installed, starts `ollama serve` |
@@ -143,7 +148,7 @@ of a filesystem path -- a much lower-friction "pick a model, click Run" flow.
 ## File Layout
 
 ```
-noriter-ai-0.1.0.exe          ← Standalone Windows EXE (no installer needed)
+noriter-ai-0.1.1.exe          ← Standalone Windows EXE (no installer needed)
 CHANGELOG.md                   ← Version history
 SPEC.md                        ← This file
 
@@ -188,14 +193,14 @@ src/                           ← Legacy VS Code extension (TypeScript, v0.0.5)
 
 ```batch
 REM Just double-click or run from terminal:
-noriter-ai-0.1.0.exe
+noriter-ai-0.1.1.exe
 
 REM Optionally specify a workspace path:
-noriter-ai-0.1.0.exe C:\MyProject
+noriter-ai-0.1.1.exe C:\MyProject
 
 REM Use external LLM (e.g. LM Studio on port 1234):
 set NORITER_MODEL_ENDPOINT=http://localhost:1234/v1
-noriter-ai-0.1.0.exe
+noriter-ai-0.1.1.exe
 ```
 
 The app opens `http://localhost:3742` in your default browser automatically.
@@ -211,5 +216,5 @@ Requires [Dart SDK](https://dart.dev/get-dart) 3.3+.
 ```batch
 cd dart_platform
 dart pub get
-dart compile exe bin/noriter_ai.dart -o ..\noriter-ai-0.1.0.exe
+dart compile exe bin/noriter_ai.dart -o ..\noriter-ai-0.1.1.exe
 ```

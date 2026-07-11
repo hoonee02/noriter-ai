@@ -2,6 +2,15 @@
 
 See [BUGFIXES.md](BUGFIXES.md) for a detailed, symptom → root cause → fix log of every bug found during development.
 
+## [0.1.1] - 2026-07-12
+### Added
+- **Image attachment for vision-capable models**: the 📎 attach button now also accepts images (png/jpg/jpeg/gif/webp, up to 4MB). Images are read client-side as a base64 data URL and sent as a multimodal chat message (not inlined as text), so a vision-capable model (e.g. `gemma3:4b`, marked "image-capable" in the recommended list) can actually look at them. Like file attachments, only a short placeholder is kept in history -- the image data itself is never persisted or resent on later turns.
+- **Recommended model lineup**: added `exaone3.5:2.4b` and `exaone3.5:7.8b` (LG AI Research), the latter sized to fit comfortably within a 6GB-VRAM GPU (e.g. GTX 1660) alongside 32GB system RAM.
+
+### Verified live
+- `exaone3.5:7.8b` pulled and ran successfully end-to-end through the new Ollama backend on real hardware, confirming the v0.1.0 backend swap works outside the sandbox it was built in.
+- Sent a plain-text chat message through the running engine after the multimodal message-type refactor and got a correct, coherent reply back, confirming ordinary text chat wasn't regressed.
+
 ## [0.1.0] - 2026-07-11
 ### Changed
 - **Embedded engine backend switched from llama.cpp to Ollama.** Priority was frictionless local model use ("no manual GGUF hunting, one click to chat"); Ollama manages model pulling/quantization internally and is addressed by tag (`gemma3:4b`) instead of a downloaded file path.
