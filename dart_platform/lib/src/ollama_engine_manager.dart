@@ -237,7 +237,7 @@ class OllamaEngineManager {
   static const List<Map<String, String>> recommendedModels = [
     {'name': 'Gemma-3-1B-Instruct (fastest, low RAM)', 'tag': 'gemma3:1b'},
     {'name': 'Llama-3.2-1B-Instruct (alternative to Gemma-3-1B)', 'tag': 'llama3.2:1b'},
-    {'name': 'Gemma-3-4B-Instruct (best overall quality/speed)', 'tag': 'gemma3:4b'},
+    {'name': 'Gemma-3-4B-Instruct (best overall quality/speed, image-capable)', 'tag': 'gemma3:4b'},
     {'name': 'Phi-3-mini (quality alternative)', 'tag': 'phi3:mini'},
     {'name': 'EXAONE-3.5-2.4B-Instruct (LG, Korean+English, light)', 'tag': 'exaone3.5:2.4b'},
     {'name': 'EXAONE-3.5-7.8B-Instruct (LG, fits GTX 1660 6GB VRAM comfortably)', 'tag': 'exaone3.5:7.8b'},

@@ -217,14 +217,26 @@ class NoriterServer {
         final attachment = msg['attachment'];
         String? finalValue = value;
         String? historyValue;
+        List<String> imageDataUrls = const [];
         if (attachment is Map<String, dynamic>) {
           final fileName = (attachment['name'] as String?) ?? 'file';
           final content = (attachment['content'] as String?) ?? '';
-          finalValue = _composeMessageWithAttachment(value, fileName, content);
-          historyValue = _composeAttachmentHistoryPlaceholder(value, fileName, content.length);
+          final isImage = attachment['isImage'] == true;
+          if (isImage) {
+            finalValue = (value != null && value.trim().isNotEmpty) ? value.trim() : 'Please analyze the attached image.';
+            historyValue = '$finalValue\n\n[Attached image: $fileName]';
+            imageDataUrls = [content];
+          } else {
+            finalValue = _composeMessageWithAttachment(value, fileName, content);
+            historyValue = _composeAttachmentHistoryPlaceholder(value, fileName, content.length);
+          }
         }
         if (finalValue != null && finalValue.trim().isNotEmpty) {
-          await _handleSendMessage(finalValue.trim(), historyMessage: historyValue?.trim());
+          await _handleSendMessage(
+            finalValue.trim(),
+            historyMessage: historyValue?.trim(),
+            imageDataUrls: imageDataUrls,
+          );
         }
         break;
 
@@ -549,7 +561,11 @@ class NoriterServer {
         '-- content was provided for this turn only and is not kept in later context]';
   }
 
-  Future<void> _handleSendMessage(String message, {String? historyMessage}) async {
+  Future<void> _handleSendMessage(
+    String message, {
+    String? historyMessage,
+    List<String> imageDataUrls = const [],
+  }) async {
     if (_wsDebug) {
       stdout.writeln('[agent][web] incoming: ${_truncateForLog(message)}');
     }
@@ -629,6 +645,7 @@ class NoriterServer {
         ),
         () => _cancelled,
         contextMessages,
+        imageDataUrls: imageDataUrls,
       );
     } catch (e) {
       final err = e.toString();

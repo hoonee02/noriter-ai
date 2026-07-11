@@ -54,8 +54,9 @@ class LocalAgent {
     String userMessage,
     AgentProgress progress,
     bool Function() isCancelled,
-    List<Map<String, String>> contextMessages,
-  ) async {
+    List<Map<String, String>> contextMessages, {
+    List<String> imageDataUrls = const [],
+  }) async {
     final cannedReply = _trySmallTalkReply(userMessage);
     if (cannedReply != null) {
       progress.onFinalAnswer(cannedReply);
@@ -86,6 +87,7 @@ IMPORTANT BEHAVIOR RULES:
 - Use tools only when the user explicitly asks for workspace/file/command actions or when a tool is truly needed for accuracy.
 - Never call sendTelegramMessage unless the user explicitly asks to send a Telegram message.
 - If the user message contains a "[Attached file: ...]" block, its content is already inlined right there -- never call readFile/writeFile or any other tool to access it, just work with the inlined text directly.
+${imageDataUrls.isNotEmpty ? '- One or more images are attached directly to this message. Look at them and answer based on what you actually see -- do not call any tool for this, and do not claim you cannot see images.' : ''}
 
 To complete the user's task, you must output step-by-step using this exact ReAct format:
 
@@ -110,21 +112,33 @@ IMPORTANT: You can only call one tool at a time. Do not write "Observation:" you
 If no tool is needed, return "Final Answer:" immediately.
 ''';
 
-    final normalizedContext = _normalizeAlternatingMessages(contextMessages);
-    final messages = <Map<String, String>>[
+    final normalizedContext = _normalizeAlternatingMessages(
+      contextMessages.map((m) => Map<String, dynamic>.from(m)).toList(),
+    );
+    final messages = <Map<String, dynamic>>[
       ...normalizedContext,
     ];
     final enrichedUserMessage = _composeUserTurn(systemPrompt, userMessage);
+
+    // Images are only ever attached to the current turn (never persisted to
+    // history, same policy as file attachments -- see server.dart), so the
+    // content becomes a multimodal parts array instead of a plain string.
+    final dynamic userContent = imageDataUrls.isEmpty
+        ? enrichedUserMessage
+        : [
+            {'type': 'text', 'text': enrichedUserMessage},
+            for (final url in imageDataUrls) {'type': 'image_url', 'image_url': {'url': url}},
+          ];
 
     final shouldAppendCurrentUser = normalizedContext.isEmpty ||
         normalizedContext.last['role'] != 'user' ||
         normalizedContext.last['content'] != userMessage;
     if (shouldAppendCurrentUser) {
-      messages.add({'role': 'user', 'content': enrichedUserMessage});
+      messages.add({'role': 'user', 'content': userContent});
     } else if (messages.isNotEmpty && messages.last['role'] == 'user') {
       messages[messages.length - 1] = {
         'role': 'user',
-        'content': enrichedUserMessage,
+        'content': userContent,
       };
     }
 
@@ -373,26 +387,32 @@ bool _isContextSizeExceeded(String responseBody) {
   return responseBody.contains('exceed_context_size_error');
 }
 
-List<Map<String, String>> _normalizeAlternatingMessages(
-  List<Map<String, String>> source,
+/// Merges consecutive same-role messages (as the original text-only version
+/// did) but tolerates `content` being either a String or a multimodal parts
+/// list (`[{type: text, ...}, {type: image_url, ...}]`) -- only String
+/// content gets merged by concatenation; entries with list content (i.e.
+/// carrying an image) are kept as their own message rather than merged,
+/// since there's no sensible way to splice two parts arrays' text together.
+List<Map<String, dynamic>> _normalizeAlternatingMessages(
+  List<Map<String, dynamic>> source,
 ) {
-  final result = <Map<String, String>>[];
+  final result = <Map<String, dynamic>>[];
   for (final item in source) {
     final role = item['role'];
     final content = item['content'];
-    if ((role != 'user' && role != 'assistant') ||
-        content == null ||
-        content.trim().isEmpty) {
-      continue;
-    }
+    if (role != 'user' && role != 'assistant') continue;
+    if (content == null) continue;
+    if (content is String && content.trim().isEmpty) continue;
 
     if (result.isNotEmpty && result.last['role'] == role) {
-      final merged = '${result.last['content']}\n\n$content';
-      result[result.length - 1] = {'role': role!, 'content': merged};
-      continue;
+      final lastContent = result.last['content'];
+      if (lastContent is String && content is String) {
+        result[result.length - 1] = {'role': role, 'content': '$lastContent\n\n$content'};
+        continue;
+      }
     }
 
-    result.add({'role': role!, 'content': content});
+    result.add({'role': role, 'content': content});
   }
 
   if (result.isNotEmpty && result.first['role'] == 'assistant') {
