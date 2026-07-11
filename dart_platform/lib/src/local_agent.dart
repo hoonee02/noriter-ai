@@ -90,7 +90,7 @@ To complete the user's task, you must output step-by-step using this exact ReAct
 
 Thought: Describe your reasoning for the current step.
 Action: The name of the tool to execute. Must be one of: [$toolNames]
-Action Input: The arguments for the tool in JSON format. Ensure all quotes are valid.
+Action Input: The arguments for the tool as a SINGLE valid JSON object. Ensure all quotes are valid. NEVER use string concatenation (the "+" operator) or split a string across multiple quoted pieces -- write one JSON string, using \n for newlines.
 Observation: [The system will provide the tool output here. DO NOT write this line yourself. Stop outputting after Action Input.]
 
 Example format:
@@ -240,28 +240,26 @@ If no tool is needed, return "Final Answer:" immediately.
           // Clean markdown code blocks
           toolArgsStr = toolArgsStr.replaceAll(RegExp(r'^```json', caseSensitive: false), '').replaceAll(RegExp(r'```$'), '').trim();
 
-          Map<String, dynamic> toolArgs;
-          try {
-            toolArgs = jsonDecode(toolArgsStr) as Map<String, dynamic>;
-          } catch (_) {
+          Map<String, dynamic>? toolArgs = _tryParseToolArgs(toolArgsStr);
+          if (toolArgs == null) {
             if (toolName == 'runTerminalCommand' && !toolArgsStr.startsWith('{')) {
               toolArgs = {'command': toolArgsStr};
             } else if (toolName == 'readFile' && !toolArgsStr.startsWith('{')) {
               toolArgs = {'relativePath': toolArgsStr};
-            } else {
-              final jsonBlock = RegExp(r'\{[\s\S]*\}').firstMatch(toolArgsStr);
-              if (jsonBlock != null) {
-                try {
-                  toolArgs = jsonDecode(jsonBlock.group(0)!) as Map<String, dynamic>;
-                } catch (_) {
-                  progress.onError('Failed to parse tool arguments: "$toolArgsStr".');
-                  return;
-                }
-              } else {
-                progress.onError('Failed to parse tool arguments: "$toolArgsStr".');
-                return;
-              }
             }
+          }
+
+          if (toolArgs == null) {
+            // Malformed JSON (e.g. a small model emitting JS-style string
+            // concatenation instead of one JSON string) shouldn't kill the
+            // whole turn -- feed it back as an Observation so the model can
+            // retry with valid JSON, same as the disallowed-tool feedback path.
+            final feedback =
+                'Your Action Input was not valid JSON: "$toolArgsStr". '
+                'Re-emit Action Input as a single valid JSON object -- do not '
+                'use string concatenation ("+") or split the value across multiple quoted pieces.';
+            messages.add({'role': 'user', 'content': 'Observation: $feedback'});
+            continue;
           }
 
           progress.onToolStart(toolName, toolArgs);
@@ -298,6 +296,37 @@ If no tool is needed, return "Final Answer:" immediately.
     }
     progress.onError('Maximum iterations reached without a final answer.');
   }
+}
+
+/// Parses a tool's Action Input, tolerating the JS-style string
+/// concatenation small models sometimes emit instead of one JSON string
+/// (e.g. `"a\n" + "b\n" + "c"` instead of `"a\nb\nc"`).
+Map<String, dynamic>? _tryParseToolArgs(String raw) {
+  Map<String, dynamic>? decode(String candidate) {
+    try {
+      final decoded = jsonDecode(candidate);
+      return decoded is Map<String, dynamic> ? decoded : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String repairConcatenation(String candidate) =>
+      candidate.replaceAll(RegExp(r'"\s*\+\s*"'), '');
+
+  final direct = decode(raw);
+  if (direct != null) return direct;
+
+  final repaired = decode(repairConcatenation(raw));
+  if (repaired != null) return repaired;
+
+  final jsonBlock = RegExp(r'\{[\s\S]*\}').firstMatch(raw)?.group(0);
+  if (jsonBlock == null) return null;
+
+  final blockDirect = decode(jsonBlock);
+  if (blockDirect != null) return blockDirect;
+
+  return decode(repairConcatenation(jsonBlock));
 }
 
 bool _isContextSizeExceeded(String responseBody) {
