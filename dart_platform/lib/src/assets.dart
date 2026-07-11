@@ -71,7 +71,13 @@ const String kChatHtml = r'''<!DOCTYPE html>
                 <strong>&#9881;&#65039; LLM Engine Manager</strong>
                 <button id="engine-panel-close" style="background:transparent;border:none;color:var(--vscode-descriptionForeground);cursor:pointer;font-size:14px;">&#10005;</button>
             </div>
-            <div id="engine-status-text" style="margin-bottom:8px; color:var(--vscode-descriptionForeground);">Loading status...</div>
+            <div id="engine-status-text" class="engine-status-line">Loading status...</div>
+            <div id="engine-model-row" class="engine-model-row">
+                <select id="engine-model-select" class="engine-model-select" disabled>
+                    <option value="">(no local models yet)</option>
+                </select>
+                <button id="engine-run-btn" class="action-btn run-btn" disabled>&#9654;&#65039; Run</button>
+            </div>
             <div style="margin-bottom:10px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
                     <label for="context-size-slider" style="font-weight:600;">Context Size</label>
@@ -80,7 +86,6 @@ const String kChatHtml = r'''<!DOCTYPE html>
                 <input type="range" id="context-size-slider" min="512" max="32768" step="512" value="4096" style="width:100%;">
                 <div style="color:var(--vscode-descriptionForeground); font-size:10px; margin-top:2px;">Applied the next time you start the engine. Larger values use more RAM.</div>
             </div>
-            <div id="engine-actions" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;"></div>
             <div id="local-models-section" style="margin-bottom:10px;">
                 <div style="font-weight:600; margin-bottom:4px;">Local Models</div>
                 <div id="local-models-list" style="color:var(--vscode-descriptionForeground);">(none)</div>
@@ -445,6 +450,37 @@ body {
     background: #2d8020;
 }
 
+.engine-status-line {
+    margin-bottom: 8px;
+    color: var(--vscode-descriptionForeground);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.engine-model-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.engine-model-select {
+    flex: 1;
+    min-width: 0;
+    padding: 4px 6px;
+    background-color: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, rgba(255, 255, 255, 0.2));
+    border-radius: var(--border-radius);
+    font-family: inherit;
+    font-size: inherit;
+}
+
+.engine-model-row .action-btn {
+    flex: none;
+    white-space: nowrap;
+}
+
 .danger-btn {
     background: rgba(255, 85, 85, 0.3);
     color: #ff5555;
@@ -469,7 +505,8 @@ const String kMainJs = r'''(function () {
     const enginePanel = document.getElementById('engine-panel');
     const enginePanelClose = document.getElementById('engine-panel-close');
     const engineStatusText = document.getElementById('engine-status-text');
-    const engineActions = document.getElementById('engine-actions');
+    const engineModelSelect = document.getElementById('engine-model-select');
+    const engineRunBtn = document.getElementById('engine-run-btn');
     const localModelsList = document.getElementById('local-models-list');
     const recommendedModelsList = document.getElementById('recommended-models-list');
     const contextSizeSlider = document.getElementById('context-size-slider');
@@ -591,7 +628,7 @@ const String kMainJs = r'''(function () {
                         var statusMsg = message.state ? (message.state.statusMessage || message.state.status) : 'Unknown';
                         engineStatusText.textContent = statusMsg;
                     }
-                    updateEngineActions(message);
+                    updateEngineModelRow(message);
                     updateLocalModels(message.localModels || []);
                     updateRecommendedModels(message.recommendedModels || []);
                     if (contextSizeSlider && contextSizeValue && message.state && message.state.contextSize) {
@@ -897,40 +934,75 @@ const String kMainJs = r'''(function () {
         };
     }
 
-    function updateEngineActions(msg) {
-        if (!engineActions) return;
-        engineActions.innerHTML = '';
-        var isInstalled = msg.isInstalled;
+    // Rebuilds the single "model select + Run" row from the latest engine
+    // status: the button's label/action changes with state (Download / Run /
+    // Stop), and the select lists local models when one can be picked.
+    function updateEngineModelRow(msg) {
+        if (!engineModelSelect || !engineRunBtn) return;
+        var isInstalled = !!msg.isInstalled;
         var status = msg.state ? msg.state.status : 'idle';
         var models = msg.localModels || [];
+        var activeModelPath = msg.activeModelPath || (msg.state && msg.state.activeModelPath) || '';
         var isBusy = status === 'starting' || status === 'downloadingEngine' || status === 'downloadingModel';
 
+        function modelLabel(path) {
+            return path.split('/').pop().split('\\').pop();
+        }
+
+        var previousSelection = engineModelSelect.value;
+        engineModelSelect.innerHTML = '';
+
         if (!isInstalled) {
-            var btn = document.createElement('button');
-            btn.className = 'action-btn';
-            btn.textContent = '\u2B07\uFE0F Download Engine';
-            btn.disabled = isBusy;
-            btn.addEventListener('click', function () {
+            var opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'Engine not installed yet';
+            engineModelSelect.appendChild(opt);
+            engineModelSelect.disabled = true;
+            engineRunBtn.className = 'action-btn';
+            engineRunBtn.textContent = '\u2B07\uFE0F Download Engine';
+            engineRunBtn.disabled = isBusy;
+            engineRunBtn.onclick = function () {
                 ws.send(JSON.stringify({ type: 'downloadEngine' }));
+            };
+            return;
+        }
+
+        if (models.length === 0) {
+            var noModelOpt = document.createElement('option');
+            noModelOpt.value = '';
+            noModelOpt.textContent = '(no local models yet -- download one below)';
+            engineModelSelect.appendChild(noModelOpt);
+            engineModelSelect.disabled = true;
+        } else {
+            models.forEach(function (m) {
+                var modelOpt = document.createElement('option');
+                modelOpt.value = m;
+                modelOpt.textContent = modelLabel(m);
+                engineModelSelect.appendChild(modelOpt);
             });
-            engineActions.appendChild(btn);
-        } else if (status === 'ready') {
-            var stopBtn = document.createElement('button');
-            stopBtn.className = 'action-btn danger-btn';
-            stopBtn.textContent = '\u23F9\uFE0F Stop Engine';
-            stopBtn.addEventListener('click', function () {
+            engineModelSelect.disabled = status === 'ready' || isBusy;
+            var preselect = activeModelPath || previousSelection;
+            if (preselect && models.includes(preselect)) {
+                engineModelSelect.value = preselect;
+            }
+        }
+
+        if (status === 'ready') {
+            engineRunBtn.className = 'action-btn danger-btn';
+            engineRunBtn.textContent = '\u23F9\uFE0F Stop Engine';
+            engineRunBtn.disabled = false;
+            engineRunBtn.onclick = function () {
                 ws.send(JSON.stringify({ type: 'stopEngine' }));
-            });
-            engineActions.appendChild(stopBtn);
-        } else if (models.length > 0) {
-            var runBtn = document.createElement('button');
-            runBtn.className = 'action-btn run-btn';
-            runBtn.textContent = '\u25B6\uFE0F Run: ' + models[0].split('/').pop().split('\\').pop();
-            runBtn.disabled = isBusy;
-            runBtn.addEventListener('click', function () {
-                ws.send(JSON.stringify({ type: 'startEngine', modelPath: models[0], contextSize: getSelectedContextSize() }));
-            });
-            engineActions.appendChild(runBtn);
+            };
+        } else {
+            engineRunBtn.className = 'action-btn run-btn';
+            engineRunBtn.textContent = isBusy ? '\u23F3 Working...' : '\u25B6\uFE0F Run';
+            engineRunBtn.disabled = isBusy || models.length === 0;
+            engineRunBtn.onclick = function () {
+                var selected = engineModelSelect.value;
+                if (!selected) return;
+                ws.send(JSON.stringify({ type: 'startEngine', modelPath: selected, contextSize: getSelectedContextSize() }));
+            };
         }
     }
 
@@ -948,6 +1020,9 @@ const String kMainJs = r'''(function () {
         telegramEnabled.checked = !!cfg.enabled;
     }
 
+    // Informational only -- picking/running a model happens via the
+    // model-select + Run row above. This just lists what's on disk, with a
+    // checkmark next to whichever one the select currently points at.
     function updateLocalModels(models) {
         if (!localModelsList) return;
         if (!models || models.length === 0) {
@@ -955,25 +1030,12 @@ const String kMainJs = r'''(function () {
             return;
         }
         localModelsList.innerHTML = '';
+        var selected = engineModelSelect ? engineModelSelect.value : '';
         models.forEach(function (m) {
             var div = document.createElement('div');
             var name = m.split('/').pop().split('\\').pop();
-            div.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:3px 0;';
-            div.innerHTML = '<span style="font-size:11px; color:var(--vscode-sideBar-foreground);">' + name + '</span>';
-            var runBtn = document.createElement('button');
-            runBtn.className = 'action-btn';
-            runBtn.style.cssText = 'padding:2px 8px; font-size:11px;';
-            runBtn.textContent = engineInstalled ? 'Run' : 'Install Engine First';
-            runBtn.disabled = !engineInstalled;
-            runBtn.addEventListener('click', function () {
-                if (!engineInstalled) {
-                    ws.send(JSON.stringify({ type: 'downloadEngine' }));
-                    return;
-                }
-                ws.send(JSON.stringify({ type: 'startEngine', modelPath: m, contextSize: getSelectedContextSize() }));
-                enginePanel.style.display = 'none';
-            });
-            div.appendChild(runBtn);
+            div.style.cssText = 'padding:2px 0; font-size:11px; color:var(--vscode-sideBar-foreground);';
+            div.textContent = (m === selected ? '✓ ' : '') + name;
             localModelsList.appendChild(div);
         });
     }

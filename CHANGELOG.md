@@ -8,6 +8,8 @@ See [BUGFIXES.md](BUGFIXES.md) for a detailed, symptom → root cause → fix lo
 - **Remember last engine + confirm-to-relaunch**: the app now remembers the last model + context size that was successfully started (`.noriter-ai/last-engine.json`). On the next launch, if that model file still exists and no engine is running yet, a confirmation dialog offers to start it automatically
 - **Per-bubble timestamps**: every chat message now shows an `HH:mm` time so the conversation reads like a real chat thread
 - **`WS_DEBUG=1`**: optional environment variable that logs every WebSocket event and agent turn to stdout, for tracing activity that's collapsed or otherwise hidden in the UI
+- **Redesigned Engine panel**: status message (1 line) and a model-select dropdown with a Run button to its right (1 line) replace the old scattered action-button layout; the button's label/action switches contextually (Download Engine / Run / Stop)
+- **Recommended model lineup reworked around Gemma 3**: replaced the outdated Gemma-2-2B entry with Gemma-3-1B-Instruct and Gemma-3-4B-Instruct (a generation newer, noticeably better at the same size), alongside Llama-3.2-1B and Phi-3-mini-4k
 
 ### Fixed
 - Agent replies were being cut off mid-sentence (`max_tokens` was never set on the `/chat/completions` request, so llama-server fell back to a small default completion length)

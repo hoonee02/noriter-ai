@@ -72,31 +72,34 @@ class ModelDownloadService {
     return 'model_${DateTime.now().millisecondsSinceEpoch}.gguf';
   }
 
-  /// Recommended free models.
+  /// Recommended free models, reworked around the Gemma 3 generation
+  /// (previously Gemma 2) since it noticeably outperforms same-size models
+  /// from a generation ago -- especially at the 1B/4B sizes, where the
+  /// older small models struggled most with the ReAct tool-calling prompt.
   static const List<Map<String, String>> recommendedModels = [
     {
-      'name': 'Qwen2.5-0.5B-Instruct (500MB, ultra-light)',
+      'name': 'Gemma-3-1B-Instruct (0.8GB, fastest, low RAM)',
       'url':
-          'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf',
-      'filename': 'qwen2.5-0.5b-instruct-q4_k_m.gguf',
+          'https://huggingface.co/bartowski/google_gemma-3-1b-it-GGUF/resolve/main/google_gemma-3-1b-it-Q4_K_M.gguf',
+      'filename': 'google_gemma-3-1b-it-Q4_K_M.gguf',
     },
     {
-      'name': 'Llama-3.2-1B-Instruct (0.8GB)',
+      'name': 'Llama-3.2-1B-Instruct (0.8GB, alternative to Gemma-3-1B)',
       'url':
           'https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf',
       'filename': 'Llama-3.2-1B-Instruct-Q4_K_M.gguf',
     },
     {
-      'name': 'Phi-3-mini-4k-instruct (2.2GB)',
+      'name': 'Gemma-3-4B-Instruct (2.6GB, best overall quality/speed)',
+      'url':
+          'https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF/resolve/main/google_gemma-3-4b-it-Q4_K_M.gguf',
+      'filename': 'google_gemma-3-4b-it-Q4_K_M.gguf',
+    },
+    {
+      'name': 'Phi-3-mini-4k-instruct (2.2GB, quality alternative)',
       'url':
           'https://huggingface.co/bartowski/Phi-3-mini-4k-instruct-GGUF/resolve/main/Phi-3-mini-4k-instruct-Q4_K_M.gguf',
       'filename': 'Phi-3-mini-4k-instruct-Q4_K_M.gguf',
-    },
-    {
-      'name': 'Gemma-2-2B-Instruct (1.6GB)',
-      'url':
-          'https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf',
-      'filename': 'gemma-2-2b-it-Q4_K_M.gguf',
     },
   ];
 }
