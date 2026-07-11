@@ -11,7 +11,7 @@ The app is distributed as a single EXE (`noriter-ai-0.0.x.exe`, ~7–8 MB) with 
 ## Architecture
 
 ```
-noriter-ai-0.0.7.exe
+noriter-ai-0.0.8.exe
 └── Dart AOT binary (single file, no runtime dependency)
     ├── HTTP server  (shelf)  → localhost:3742
     │   ├── GET  /          → embedded HTML (chat UI)
@@ -32,7 +32,14 @@ noriter-ai-0.0.7.exe
     ├── LocalAgent  (ReAct loop)
     │   ├── Thought → Tool → Observation loop
     │   ├── Calls LLM via OpenAI-compatible /v1/chat/completions
+    │   ├── Auto-recovers from exceed_context_size_error by trimming oldest context and retrying
     │   └── Uses 9 built-in tools (see Tools section)
+    │
+    ├── TelegramBridge
+    │   ├── Long-polls the Telegram Bot API (getUpdates)
+    │   ├── Auto-binds to the first chat that messages the bot if no chat ID is configured
+    │   ├── Routes messages through the same LocalAgent/history as the web chat
+    │   └── Settings persisted to .noriter-ai/telegram-config.json (gitignored)
     │
     └── Services
         ├── HistoryService   → .noriter-ai/chat-history.json
@@ -88,10 +95,12 @@ noriter-ai-0.0.7.exe
 | `stopAgent` | — | Cancel current agent run |
 | `clearHistory` | — | Clear chat history |
 | `downloadEngine` | — | Download llama-server.exe |
-| `startEngine` | `{ modelPath: string }` | Start llama-server with a model |
+| `startEngine` | `{ modelPath: string, contextSize?: int }` | Start llama-server with a model (contextSize clamped 512–32768, default 4096) |
 | `downloadModel` | `{ url, filename? }` | Download a GGUF model |
 | `getEngineStatus` | — | Request current engine state |
 | `listLocalModels` | — | List downloaded GGUF models |
+| `getTelegramStatus` | — | Request current Telegram bridge status |
+| `updateTelegramConfig` | `{ botToken?, chatId?, enabled? }` | Save Telegram settings and start/stop the bridge |
 
 ### Server → Client
 
@@ -104,15 +113,16 @@ noriter-ai-0.0.7.exe
 | `toolEnd` | `{ name, output }` | Tool call completed |
 | `finalAnswer` | `{ value }` | Agent final response |
 | `error` | `{ value }` | Error message |
-| `engineStatus` | `{ state, isInstalled, localModels, ... }` | Engine state update |
+| `engineStatus` | `{ state, isInstalled, localModels, ... }` | Engine state update (`state.contextSize` included) |
 | `localModelsList` | `{ models }` | List of downloaded models |
+| `telegramStatus` | `{ config, running, statusMessage }` | Telegram bridge state (`config` is redacted — no full token) |
 
 ---
 
 ## File Layout
 
 ```
-noriter-ai-0.0.7.exe          ← Standalone Windows EXE (no installer needed)
+noriter-ai-0.0.8.exe          ← Standalone Windows EXE (no installer needed)
 CHANGELOG.md                   ← Version history
 SPEC.md                        ← This file
 
@@ -131,6 +141,8 @@ dart_platform/                 ← Dart source code
     memory_service.dart        ← Agent memory file (Markdown)
     goal_service.dart          ← Agent goal file (Markdown)
     model_provider.dart        ← OpenAI-compatible HTTP client
+    telegram_bridge.dart       ← Telegram Bot API long-polling bridge
+    telegram_config_service.dart← Telegram bot token / chat ID persistence
     agent_app.dart             ← (legacy CLI bootstrap, superseded by server.dart)
     plan_logger.dart           ← Appends to project-plan-log.md
 
@@ -145,6 +157,7 @@ src/                           ← Legacy VS Code extension (TypeScript, v0.0.5)
   agent-memory.md
   agent-goal.md
   project-plan-log.md
+  telegram-config.json         ← Bot token / chat ID (gitignored, contains secrets)
 ```
 
 ---
@@ -153,14 +166,14 @@ src/                           ← Legacy VS Code extension (TypeScript, v0.0.5)
 
 ```batch
 REM Just double-click or run from terminal:
-noriter-ai-0.0.7.exe
+noriter-ai-0.0.8.exe
 
 REM Optionally specify a workspace path:
-noriter-ai-0.0.7.exe C:\MyProject
+noriter-ai-0.0.8.exe C:\MyProject
 
 REM Use external LLM (e.g. LM Studio on port 1234):
 set NORITER_MODEL_ENDPOINT=http://localhost:1234/v1
-noriter-ai-0.0.7.exe
+noriter-ai-0.0.8.exe
 ```
 
 The app opens `http://localhost:3742` in your default browser automatically.
@@ -174,5 +187,5 @@ Requires [Dart SDK](https://dart.dev/get-dart) 3.3+.
 ```batch
 cd dart_platform
 dart pub get
-dart compile exe bin/noriter_ai.dart -o ..\noriter-ai-0.0.7.exe
+dart compile exe bin/noriter_ai.dart -o ..\noriter-ai-0.0.8.exe
 ```

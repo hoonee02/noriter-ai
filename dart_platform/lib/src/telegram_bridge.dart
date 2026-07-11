@@ -5,17 +5,24 @@ import 'package:http/http.dart' as http;
 
 typedef TelegramMessageHandler = Future<String> Function(String text);
 typedef TelegramStatusCallback = void Function(String status);
+typedef TelegramChatBoundCallback = void Function(String chatId);
 
 /// Long-polls the Telegram Bot API and forwards incoming messages from the
 /// configured chat to [onMessage], sending the returned text back as a reply.
+///
+/// If no chat ID is configured, the bridge auto-binds to whichever chat
+/// sends the first message (typical for a single-user personal bot), and
+/// reports the discovered ID via [onChatBound] so it can be persisted.
 class TelegramBridge {
   TelegramBridge({
     required this.onMessage,
     this.onStatus,
+    this.onChatBound,
   });
 
   final TelegramMessageHandler onMessage;
   final TelegramStatusCallback? onStatus;
+  final TelegramChatBoundCallback? onChatBound;
 
   String _botToken = '';
   String _allowedChatId = '';
@@ -27,13 +34,15 @@ class TelegramBridge {
   void start(String botToken, String chatId) {
     _botToken = botToken.trim();
     _allowedChatId = _normalizeChatId(chatId);
-    if (_botToken.isEmpty || _allowedChatId.isEmpty) {
-      onStatus?.call('Telegram bridge not started: bot token or chat ID missing.');
+    if (_botToken.isEmpty) {
+      onStatus?.call('Telegram bridge not started: bot token missing.');
       return;
     }
     if (_running) return;
     _running = true;
-    onStatus?.call('Telegram bridge started.');
+    onStatus?.call(_allowedChatId.isEmpty
+        ? 'Telegram bridge started — waiting for the first message to auto-bind a chat.'
+        : 'Telegram bridge started.');
     unawaited(_pollLoop());
   }
 
@@ -98,7 +107,18 @@ class TelegramBridge {
 
       final chat = message['chat'];
       final chatId = chat is Map<String, dynamic> ? _normalizeChatId('${chat['id']}') : '';
-      if (chatId != _allowedChatId) continue;
+      if (chatId.isEmpty) continue;
+
+      if (_allowedChatId.isEmpty) {
+        _allowedChatId = chatId;
+        onStatus?.call('Bound to chat $chatId.');
+        onChatBound?.call(chatId);
+      } else if (chatId != _allowedChatId) {
+        onStatus?.call(
+            'Ignored message from chat $chatId — bridge is bound to chat $_allowedChatId. '
+            'Update the Chat ID in the Telegram panel if this should be allowed.');
+        continue;
+      }
 
       if (!_running) return;
 

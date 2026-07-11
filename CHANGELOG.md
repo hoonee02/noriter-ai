@@ -1,5 +1,16 @@
 # Noriter AI - Changelog
 
+## [0.0.8] - 2026-07-11
+### Added
+- **Telegram bot bridge** (`telegram_bridge.dart`, `telegram_config_service.dart`): long-polls the Telegram Bot API and routes messages through the same `LocalAgent`/history used by the web chat, so both surfaces stay in sync
+- **Telegram panel in frontend**: new `[Telegram]` header button opens a panel to set bot token / chat ID and enable/disable the bridge; settings persist to `.noriter-ai/telegram-config.json` (gitignored, never echoed back in full)
+- **Auto-bind chat ID**: if no chat ID is configured, the bridge binds to whichever chat sends the first message and persists it automatically, so a manual chat-ID lookup is no longer required
+- **Context size slider**: Engine panel now has a 512–32768 token slider controlling llama-server's `-c` context size (previously hardcoded to 4096)
+
+### Fixed
+- **Telegram messages read but never replied to**: the bridge was consuming `getUpdates` (advancing the offset) for every incoming message but silently dropping ones whose `chat.id` didn't match the configured `chatId`. Root cause in practice: the shipped local config had `chatId` set to the bot's own numeric ID (the token prefix) instead of the human user's chat ID. Fixed by auto-binding to the first sender when `chatId` is unset, and by surfacing a clear status message ("Ignored message from chat X — bridge is bound to chat Y") on any future mismatch instead of failing silently
+- **`exceed_context_size_error` (HTTP 400)**: agent now trims the oldest context messages and retries instead of surfacing a raw JSON error to the user
+
 ## [0.0.7] - 2026-07-09
 ### Fixed
 - Fixed encoding corruption in `assets.dart` — all broken Korean characters in HTML/JS UI replaced with English equivalents

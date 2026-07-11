@@ -69,6 +69,11 @@ class NoriterServer {
         _telegramStatusMessage = status;
         _broadcastTelegramStatus();
       },
+      onChatBound: (chatId) {
+        _telegramConfig.chatId = chatId;
+        unawaited(_telegramConfigService.save(_telegramConfig));
+        _broadcastTelegramStatus();
+      },
     );
     if (_telegramConfig.enabled) {
       _telegramBridge.start(_telegramConfig.botToken, _telegramConfig.chatId);
