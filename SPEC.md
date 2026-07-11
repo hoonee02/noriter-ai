@@ -6,6 +6,8 @@ Noriter AI is a standalone Windows desktop application that runs a local LLM-pow
 
 The app is distributed as a single EXE (`noriter-ai-0.0.x.exe`, ~7–8 MB) with no installer and no code signing. It works on Windows 10/11 without admin rights.
 
+See also: [CHANGELOG.md](CHANGELOG.md) for release history, [BUGFIXES.md](BUGFIXES.md) for a symptom → root cause → fix log of bugs found during development.
+
 ---
 
 ## Architecture
@@ -31,8 +33,9 @@ noriter-ai-0.0.9.exe
     │
     ├── LocalAgent  (ReAct loop)
     │   ├── Thought → Tool → Observation loop
-    │   ├── Calls LLM via OpenAI-compatible /v1/chat/completions
+    │   ├── Calls LLM via OpenAI-compatible /v1/chat/completions (max_tokens: 2048)
     │   ├── Auto-recovers from exceed_context_size_error by trimming oldest context and retrying
+    │   ├── Repairs/self-corrects malformed tool-call JSON instead of aborting the turn
     │   └── Uses 9 built-in tools (see Tools section)
     │
     ├── TelegramBridge

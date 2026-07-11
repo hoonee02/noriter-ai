@@ -1,9 +1,23 @@
 # Noriter AI - Changelog
 
+See [BUGFIXES.md](BUGFIXES.md) for a detailed, symptom → root cause → fix log of every bug found during development.
+
 ## [0.0.9] - 2026-07-11
 ### Added
 - **Local file attachment in chat**: new paperclip button next to the chat input lets you attach a local text-based file (txt, md, json, csv, code, log, etc., up to 500 KB); its content is read client-side and embedded in the next message sent to the agent, so it can review/summarize/edit it like any other conversation turn
 - **Remember last engine + confirm-to-relaunch**: the app now remembers the last model + context size that was successfully started (`.noriter-ai/last-engine.json`). On the next launch, if that model file still exists and no engine is running yet, a confirmation dialog offers to start it automatically
+- **Per-bubble timestamps**: every chat message now shows an `HH:mm` time so the conversation reads like a real chat thread
+- **`WS_DEBUG=1`**: optional environment variable that logs every WebSocket event and agent turn to stdout, for tracing activity that's collapsed or otherwise hidden in the UI
+
+### Fixed
+- Agent replies were being cut off mid-sentence (`max_tokens` was never set on the `/chat/completions` request, so llama-server fell back to a small default completion length)
+- Attaching a file permanently bloated conversation context for all later turns (full attachment body was persisted to history instead of a placeholder)
+- Attached-file requests got a generic "I apologize... still learning to interact with files" reply because the model tried to `readFile` a file that only existed inline in the prompt, not in the workspace
+- Malformed tool-call JSON (JS-style string concatenation) killed the whole agent turn instead of letting the model self-correct
+- Telegram bridge always replied "Done." instead of the real answer (fire-and-forget callback race)
+- Telegram messages were read but never replied to (misconfigured `chatId`; bridge now auto-binds to the first sender)
+
+See [BUGFIXES.md](BUGFIXES.md) for details on each of these.
 
 ## [0.0.8] - 2026-07-11
 ### Added

@@ -155,6 +155,12 @@ If no tool is needed, return "Final Answer:" immediately.
             'model': modelName,
             'messages': requestMessages,
             'temperature': 0.1,
+            // Without an explicit cap, llama-server's OpenAI-compat layer
+            // falls back to a small default completion length, which cuts
+            // final answers off mid-sentence (e.g. "The file" or "Okay, I
+            // understand. I'm ready to"). 2048 gives real answers room to
+            // finish while still bounded well under typical context sizes.
+            'max_tokens': 2048,
             'stop': ['Observation:', 'Observation\n'],
           }),
         );
