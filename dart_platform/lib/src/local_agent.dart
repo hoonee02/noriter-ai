@@ -85,6 +85,7 @@ IMPORTANT BEHAVIOR RULES:
 - If the user message is casual conversation (greeting, chit-chat, opinion, or simple Q/A), respond directly with "Final Answer:" and DO NOT use tools.
 - Use tools only when the user explicitly asks for workspace/file/command actions or when a tool is truly needed for accuracy.
 - Never call sendTelegramMessage unless the user explicitly asks to send a Telegram message.
+- If the user message contains a "[Attached file: ...]" block, its content is already inlined right there -- never call readFile/writeFile or any other tool to access it, just work with the inlined text directly.
 
 To complete the user's task, you must output step-by-step using this exact ReAct format:
 

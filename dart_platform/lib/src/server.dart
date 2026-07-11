@@ -498,7 +498,15 @@ class NoriterServer {
     final prompt = (userText != null && userText.trim().isNotEmpty)
         ? userText.trim()
         : 'Please review the attached file.';
-    return '$prompt\n\n[Attached file: $fileName]\n```\n$body\n```$notice';
+    // This file was uploaded from the user's local machine, not saved to the
+    // workspace -- readFile/writeFile can't see it. Its full content is
+    // already inlined below, so the model must work with it directly instead
+    // of trying (and failing) to look it up as a workspace file.
+    return '$prompt\n\n'
+        '[Attached file: $fileName -- its full content is inlined below. '
+        'This file is NOT in the workspace, so do NOT call readFile, writeFile, '
+        'or any other tool to access it -- just read the content directly from this message.]\n'
+        '```\n$body\n```$notice';
   }
 
   Future<void> _handleSendMessage(String message) async {
