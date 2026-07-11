@@ -5,6 +5,14 @@ Chronological record of bugs found and fixed during development, kept alongside
 
 ---
 
+## Fragment/incomplete generations ("Thought: I", "Okay, I understand. I'm ready to") shown as the final answer
+**Symptom:** Even after fixing the missing `max_tokens` (below), some turns still produced a broken half-sentence as the visible reply -- e.g. the entire response was just `Thought: I`.
+**Root cause:** Two layers. (1) The underlying local model (typically a small ~0.5B-parameter model) sometimes stops generating almost immediately when the prompt is large -- a long system prompt plus tool list plus accumulated Korean conversation history can overwhelm a small model and cause it to emit a near-empty completion or hit its own stop condition early; this is a genuine model-capability limitation, not something the app can fully paper over. (2) A real code bug compounded it: any model output that didn't contain an explicit `Action:` or `Final Answer:` marker was unconditionally treated as if it *were* the final answer and shown to the user as-is, even when it was obviously just a truncated stub like `Thought: I`.
+**Fix:** `LocalAgent.run()` now detects likely-truncated fragments (a bare `Thought:` stub, or fewer than 5 words with no Action/Final Answer) and, instead of surfacing them as the answer, feeds an Observation back asking the model to continue or give a complete `Final Answer:` (retried up to twice before giving up and showing whatever it has). (`local_agent.dart`)
+**Also recommended:** if this keeps happening on a given model, switch to a larger one from the Engine panel (e.g. Llama-3.2-1B-Instruct or Phi-3-mini-4k instead of Qwen2.5-0.5B) -- small models are the most prone to this under the ReAct prompt's size.
+
+---
+
 ## Response cut off mid-sentence ("The file", "Okay, I understand. I'm ready to")
 **Symptom:** Final answers frequently ended abruptly, especially for longer responses (e.g. summarizing an attached file).
 **Root cause:** The `/chat/completions` request to llama-server never set `max_tokens`, so llama-server's OpenAI-compat layer fell back to a small default completion length and truncated every response.

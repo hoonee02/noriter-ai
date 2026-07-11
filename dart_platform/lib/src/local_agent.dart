@@ -128,6 +128,7 @@ If no tool is needed, return "Final Answer:" immediately.
       };
     }
 
+    var truncationRetries = 0;
     for (var iteration = 0; iteration < maxIterations; iteration++) {
       if (isCancelled()) {
         progress.onFinalAnswer('Agent stopped by user.');
@@ -282,7 +283,28 @@ If no tool is needed, return "Final Answer:" immediately.
             progress.onFinalAnswer(content.substring(idx + 13).trim());
             return;
           }
-          progress.onFinalAnswer(content.trim());
+
+          final trimmedContent = content.trim();
+          // A bare "Thought: ..." stub (or a handful of words) with no Action
+          // or Final Answer is a truncated/degenerate generation, not an
+          // intentional response -- the model stopped generating too early
+          // (small local models under a large prompt are prone to this).
+          // Surfacing it as-is would show the user a broken half-sentence, so
+          // ask the model to continue instead of treating it as the answer.
+          final looksTruncated = trimmedContent.toLowerCase().startsWith('thought:') ||
+              trimmedContent.split(RegExp(r'\s+')).length < 5;
+          if (looksTruncated && truncationRetries < 2) {
+            truncationRetries++;
+            messages.add({
+              'role': 'user',
+              'content': 'Observation: Your previous response was incomplete: "$trimmedContent". '
+                  'Continue it -- either call an Action or write a complete "Final Answer:". '
+                  'Do not stop mid-sentence.',
+            });
+            continue;
+          }
+
+          progress.onFinalAnswer(trimmedContent.isEmpty ? 'Done.' : trimmedContent);
           return;
         }
       } catch (e) {
