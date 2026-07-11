@@ -347,8 +347,14 @@ class NoriterServer {
       if (!completer.isCompleted) completer.complete('Agent error: $err');
     }
 
-    if (!completer.isCompleted) completer.complete('Done.');
-    return completer.future;
+    // onFinalAnswer/onError are fire-and-forget callbacks: agent.run() returns
+    // as soon as they're invoked, not once their async body (history append,
+    // broadcast) finishes. Wait for the completer itself rather than assuming
+    // it's already done, otherwise this always races to the 'Done.' fallback.
+    return completer.future.timeout(
+      const Duration(seconds: 5),
+      onTimeout: () => 'Done.',
+    );
   }
 
   Future<void> _runDownloadEngine() async {
