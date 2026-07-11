@@ -3,6 +3,9 @@
 See [BUGFIXES.md](BUGFIXES.md) for a detailed, symptom → root cause → fix log of every bug found during development.
 
 ## [Unreleased]
+### Added
+- **EXAONE-4.5-33B (image-capable)** added to the recommended list for users who specifically want vision analysis from an EXAONE model. LG has no smaller vision-capable EXAONE -- the only image-capable release is 33B. Pulled via `hf.co/mradermacher/EXAONE-4.5-33B-i1-GGUF:Q2_K` (~10GB, the smallest available quant). Labeled with an explicit ⚠ warning: on a 6GB-VRAM GPU it mostly runs on system RAM and will be noticeably slow. `gemma3:4b` remains the fast/comfortable vision option for anyone not specifically tied to EXAONE.
+
 ### Fixed
 - Attaching an image while a non-vision model was loaded showed a raw JSON API error ("Multimodal data provided, but model does not support multimodal requests"). Now checked upfront via Ollama's `/api/show` capabilities and shown as a clear message telling you to switch to a vision-capable model (e.g. `gemma3:4b`) instead.
 

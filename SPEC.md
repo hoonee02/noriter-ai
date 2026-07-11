@@ -106,6 +106,7 @@ of a filesystem path -- a much lower-friction "pick a model, click Run" flow.
 | Phi-3-mini | `phi3:mini` | Quality alternative |
 | EXAONE-3.5-2.4B-Instruct | `exaone3.5:2.4b` | LG AI Research, light |
 | EXAONE-3.5-7.8B-Instruct | `exaone3.5:7.8b` | LG AI Research, fits a 6GB-VRAM GPU (e.g. GTX 1660) + 32GB RAM comfortably |
+| EXAONE-4.5-33B | `hf.co/mradermacher/EXAONE-4.5-33B-i1-GGUF:Q2_K` | LG's only **image-capable** EXAONE (no smaller vision variant exists). ⚠ Does not fit a 6GB-VRAM GPU -- mostly runs on system RAM and will be slow. Included for users who specifically want EXAONE for vision despite the tradeoff. |
 
 ---
 

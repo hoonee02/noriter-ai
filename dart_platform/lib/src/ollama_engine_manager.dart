@@ -250,9 +250,11 @@ class OllamaEngineManager {
   bool _looksVisionCapableByName(String tag) {
     final lower = tag.toLowerCase();
     // gemma3:1b is text-only -- vision starts at gemma3:4b -- so this must
-    // check the full tag, not just the family name.
+    // check the full tag, not just the family name. Likewise EXAONE is
+    // text-only below 4.5-33B (the only image-capable EXAONE release).
     if (lower.startsWith('gemma3:1b')) return false;
-    return RegExp(r'gemma3(?!:1b)|llava|vision|moondream|bakllava|minicpm-v').hasMatch(lower);
+    return RegExp(r'gemma3(?!:1b)|llava|vision|moondream|bakllava|minicpm-v|exaone-4\.5-33b')
+        .hasMatch(lower);
   }
 
   /// Asks Ollama to unload the active model immediately (keep_alive: 0)
@@ -286,5 +288,16 @@ class OllamaEngineManager {
     {'name': 'Phi-3-mini (quality alternative)', 'tag': 'phi3:mini'},
     {'name': 'EXAONE-3.5-2.4B-Instruct (LG, Korean+English, light)', 'tag': 'exaone3.5:2.4b'},
     {'name': 'EXAONE-3.5-7.8B-Instruct (LG, fits GTX 1660 6GB VRAM comfortably)', 'tag': 'exaone3.5:7.8b'},
+    // LG has no small vision-capable EXAONE -- their only image-capable
+    // model is 33B. Q2_K (~10GB) is the smallest available quant; it still
+    // won't fit in 6GB VRAM, so most of it spills to system RAM and
+    // inference will be noticeably slow (likely single-digit tokens/sec on
+    // a GTX 1660 + 32GB RAM machine). Included because the user explicitly
+    // wants an EXAONE option for image analysis despite the tradeoff --
+    // gemma3:4b remains the fast/comfortable vision option above.
+    {
+      'name': 'EXAONE-4.5-33B (LG, image-capable, ⚠ slow on this hardware -- mostly runs on system RAM)',
+      'tag': 'hf.co/mradermacher/EXAONE-4.5-33B-i1-GGUF:Q2_K',
+    },
   ];
 }
