@@ -2,6 +2,10 @@
 
 See [BUGFIXES.md](BUGFIXES.md) for a detailed, symptom → root cause → fix log of every bug found during development.
 
+## [Unreleased]
+### Fixed
+- Attaching an image while a non-vision model was loaded showed a raw JSON API error ("Multimodal data provided, but model does not support multimodal requests"). Now checked upfront via Ollama's `/api/show` capabilities and shown as a clear message telling you to switch to a vision-capable model (e.g. `gemma3:4b`) instead.
+
 ## [0.1.1] - 2026-07-12
 ### Added
 - **Image attachment for vision-capable models**: the 📎 attach button now also accepts images (png/jpg/jpeg/gif/webp, up to 4MB). Images are read client-side as a base64 data URL and sent as a multimodal chat message (not inlined as text), so a vision-capable model (e.g. `gemma3:4b`, marked "image-capable" in the recommended list) can actually look at them. Like file attachments, only a short placeholder is kept in history -- the image data itself is never persisted or resent on later turns.

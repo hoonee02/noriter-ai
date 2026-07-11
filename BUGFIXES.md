@@ -5,6 +5,13 @@ Chronological record of bugs found and fixed during development, kept alongside
 
 ---
 
+## Raw JSON API error when attaching an image to a non-vision model
+**Symptom:** Attaching an image and sending it produced a raw error bubble: `API Error: {"error":{"message":"{...\"Multimodal data provided, but model does not support multimodal requests.\"...}"}}`.
+**Root cause:** Not a bug in the strict sense -- the image-attachment feature (see CHANGELOG v0.1.1) sends the image to whatever model is currently loaded, but most models (including EXAONE 3.5, Llama 3.2, Phi-3, and Gemma 3 below 4B) are text-only. Ollama correctly rejects the request; the app just surfaced that rejection as an unhelpful raw JSON blob instead of explaining what happened.
+**Fix:** Added `OllamaEngineManager.modelSupportsVision(tag)`, which checks Ollama's `/api/show` `capabilities` field (with a name-based fallback for older Ollama versions lacking that field). `server.dart`'s `sendMessage` handler now checks this *before* sending an image, and if the active model can't handle it, shows a clear message ("The current model does not support images. Switch to a vision-capable model, e.g. gemma3:4b.") instead of hitting the chat API and relaying its raw error. (`ollama_engine_manager.dart`, `server.dart`)
+
+---
+
 ## Fragment/incomplete generations ("Thought: I", "Okay, I understand. I'm ready to") shown as the final answer
 **Symptom:** Even after fixing the missing `max_tokens` (below), some turns still produced a broken half-sentence as the visible reply -- e.g. the entire response was just `Thought: I`.
 **Root cause:** Two layers. (1) The underlying local model (typically a small ~0.5B-parameter model) sometimes stops generating almost immediately when the prompt is large -- a long system prompt plus tool list plus accumulated Korean conversation history can overwhelm a small model and cause it to emit a near-empty completion or hit its own stop condition early; this is a genuine model-capability limitation, not something the app can fully paper over. (2) A real code bug compounded it: any model output that didn't contain an explicit `Action:` or `Final Answer:` marker was unconditionally treated as if it *were* the final answer and shown to the user as-is, even when it was obviously just a truncated stub like `Thought: I`.

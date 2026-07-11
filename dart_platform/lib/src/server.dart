@@ -223,6 +223,18 @@ class NoriterServer {
           final content = (attachment['content'] as String?) ?? '';
           final isImage = attachment['isImage'] == true;
           if (isImage) {
+            final activeTag = _activeModelTag ?? '';
+            final supportsVision = activeTag.isNotEmpty && await engineManager.modelSupportsVision(activeTag);
+            if (!supportsVision) {
+              _broadcast({
+                'type': 'error',
+                'value': activeTag.isEmpty
+                    ? 'No model is loaded, so the image could not be sent. Load a vision-capable model first (e.g. gemma3:4b).'
+                    : 'The current model ("$activeTag") does not support images. Switch to a vision-capable model '
+                        '(e.g. gemma3:4b) from the [Engine] panel and try again.',
+              });
+              break;
+            }
             finalValue = (value != null && value.trim().isNotEmpty) ? value.trim() : 'Please analyze the attached image.';
             historyValue = '$finalValue\n\n[Attached image: $fileName]';
             imageDataUrls = [content];

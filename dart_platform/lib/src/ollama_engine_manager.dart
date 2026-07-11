@@ -210,6 +210,51 @@ class OllamaEngineManager {
     _activeModel = tag;
   }
 
+  final Map<String, bool> _visionCapabilityCache = {};
+
+  /// Whether [tag] supports image input, per Ollama's own `/api/show`
+  /// (`capabilities` includes `"vision"` on recent Ollama versions). Falls
+  /// back to a name-based heuristic for older Ollama installs that don't
+  /// report `capabilities`, so a clear "this model can't see images"
+  /// message can be shown *before* sending the request and getting a raw
+  /// "model does not support multimodal requests" API error back.
+  Future<bool> modelSupportsVision(String tag) async {
+    if (tag.isEmpty) return false;
+    final cached = _visionCapabilityCache[tag];
+    if (cached != null) return cached;
+
+    var result = _looksVisionCapableByName(tag);
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/api/show'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'name': tag}),
+          )
+          .timeout(const Duration(seconds: 5));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+        final capabilities = decoded['capabilities'];
+        if (capabilities is List) {
+          result = capabilities.contains('vision');
+        }
+      }
+    } catch (_) {
+      // Keep the name-based heuristic result on any failure.
+    }
+
+    _visionCapabilityCache[tag] = result;
+    return result;
+  }
+
+  bool _looksVisionCapableByName(String tag) {
+    final lower = tag.toLowerCase();
+    // gemma3:1b is text-only -- vision starts at gemma3:4b -- so this must
+    // check the full tag, not just the family name.
+    if (lower.startsWith('gemma3:1b')) return false;
+    return RegExp(r'gemma3(?!:1b)|llava|vision|moondream|bakllava|minicpm-v').hasMatch(lower);
+  }
+
   /// Asks Ollama to unload the active model immediately (keep_alive: 0)
   /// instead of killing a subprocess, since Ollama itself keeps running.
   Future<void> stopModel() async {
