@@ -220,13 +220,15 @@ class NoriterServer {
         final value = msg['value'] as String?;
         final attachment = msg['attachment'];
         String? finalValue = value;
+        String? historyValue;
         if (attachment is Map<String, dynamic>) {
           final fileName = (attachment['name'] as String?) ?? 'file';
           final content = (attachment['content'] as String?) ?? '';
           finalValue = _composeMessageWithAttachment(value, fileName, content);
+          historyValue = _composeAttachmentHistoryPlaceholder(value, fileName, content.length);
         }
         if (finalValue != null && finalValue.trim().isNotEmpty) {
-          await _handleSendMessage(finalValue.trim());
+          await _handleSendMessage(finalValue.trim(), historyMessage: historyValue?.trim());
         }
         break;
 
@@ -509,7 +511,20 @@ class NoriterServer {
         '```\n$body\n```$notice';
   }
 
-  Future<void> _handleSendMessage(String message) async {
+  /// Short stand-in stored to persistent history instead of the full
+  /// attachment body. Every future turn resends the whole conversation
+  /// history as LLM context, so keeping the full file content there would
+  /// make context balloon (and get silently trimmed / overwhelm small
+  /// models) on every later message, not just the turn where it was sent.
+  String _composeAttachmentHistoryPlaceholder(String? userText, String fileName, int contentLength) {
+    final prompt = (userText != null && userText.trim().isNotEmpty)
+        ? userText.trim()
+        : 'Please review the attached file.';
+    return '$prompt\n\n[Attached file: $fileName ($contentLength chars) '
+        '-- content was provided for this turn only and is not kept in later context]';
+  }
+
+  Future<void> _handleSendMessage(String message, {String? historyMessage}) async {
     if (_wsDebug) {
       stdout.writeln('[agent][web] incoming: ${_truncateForLog(message)}');
     }
@@ -565,8 +580,9 @@ class NoriterServer {
     }
 
     _cancelled = false;
-    await _history.append('user', message);
-    _broadcast({'type': 'sessionStart', 'userPrompt': message});
+    final storedMessage = historyMessage ?? message;
+    await _history.append('user', storedMessage);
+    _broadcast({'type': 'sessionStart', 'userPrompt': storedMessage});
 
     final contextMessages = _history.buildContextMessages();
 

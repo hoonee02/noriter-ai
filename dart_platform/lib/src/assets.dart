@@ -269,6 +269,21 @@ body {
     border: 1px solid var(--vscode-panel-border, rgba(255, 255, 255, 0.1));
 }
 
+.message-text {
+    white-space: pre-wrap;
+}
+
+.message-time {
+    align-self: flex-end;
+    font-size: 10px;
+    opacity: 0.6;
+    margin-top: 3px;
+}
+
+.message.assistant .message-time {
+    align-self: flex-start;
+}
+
 .log-block {
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid rgba(255, 255, 255, 0.05);
@@ -782,10 +797,27 @@ const String kMainJs = r'''(function () {
         }
     }
 
-    function addMessage(text, sender) {
+    function formatMessageTime(timestamp) {
+        var date = timestamp ? new Date(timestamp) : new Date();
+        var hh = String(date.getHours()).padStart(2, '0');
+        var mm = String(date.getMinutes()).padStart(2, '0');
+        return hh + ':' + mm;
+    }
+
+    function addMessage(text, sender, timestamp) {
         var msgDiv = document.createElement('div');
         msgDiv.className = 'message ' + sender;
-        msgDiv.textContent = text;
+
+        var textDiv = document.createElement('div');
+        textDiv.className = 'message-text';
+        textDiv.textContent = text;
+        msgDiv.appendChild(textDiv);
+
+        var timeDiv = document.createElement('div');
+        timeDiv.className = 'message-time';
+        timeDiv.textContent = formatMessageTime(timestamp);
+        msgDiv.appendChild(timeDiv);
+
         chatMessages.appendChild(msgDiv);
         scrollToBottom();
     }
@@ -812,19 +844,19 @@ const String kMainJs = r'''(function () {
             }
 
             if (entry.type === 'user') {
-                addMessage(entry.text, 'user');
+                addMessage(entry.text, 'user', entry.timestamp);
                 return;
             }
 
             if (entry.type === 'assistant') {
-                addMessage(entry.text, 'assistant');
+                addMessage(entry.text, 'assistant', entry.timestamp);
                 return;
             }
 
             if (entry.type === 'error') {
                 var errDiv = document.createElement('div');
                 errDiv.className = 'error-message';
-                errDiv.textContent = '\u26A0\uFE0F Error: ' + entry.text;
+                errDiv.textContent = '\u26A0\uFE0F Error: ' + entry.text + ' (' + formatMessageTime(entry.timestamp) + ')';
                 chatMessages.appendChild(errDiv);
             }
         });
