@@ -545,6 +545,7 @@ const String kMainJs = r'''(function () {
                     break;
                 case 'thought':
                     currentLogBlock = createLogBlock('\uD83E\uDD14 Agent Thought', message.value);
+                    showActivity(true, truncateForStatus(message.value));
                     break;
                 case 'toolStart':
                     var argsStr = JSON.stringify(message.args, null, 2);
@@ -761,6 +762,13 @@ const String kMainJs = r'''(function () {
         }
     }
 
+    function truncateForStatus(text, maxLength) {
+        maxLength = maxLength || 80;
+        if (!text) return 'Thinking...';
+        var oneLine = String(text).replace(/\s+/g, ' ').trim();
+        return oneLine.length > maxLength ? oneLine.slice(0, maxLength) + '…' : oneLine;
+    }
+
     function showActivity(show, text) {
         if (show) {
             agentActivity.style.display = 'flex';
@@ -826,7 +834,7 @@ const String kMainJs = r'''(function () {
 
     function createLogBlock(title, initialContent) {
         var block = document.createElement('div');
-        block.className = 'log-block collapsed';
+        block.className = 'log-block';
 
         var header = document.createElement('div');
         header.className = 'log-header';
