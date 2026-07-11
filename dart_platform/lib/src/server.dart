@@ -96,6 +96,9 @@ class NoriterServer {
 
     final server = await shelf_io.serve(handler, 'localhost', config.port);
     stdout.writeln('Noriter AI server running at http://localhost:${server.port}');
+    if (_wsDebug) {
+      stdout.writeln('[ws] WS_DEBUG=1 — logging all WebSocket traffic and agent turns to this console.');
+    }
   }
 
   void _rebuildAgent() {
@@ -188,6 +191,7 @@ class NoriterServer {
       (data) async {
         try {
           final msg = jsonDecode(data as String) as Map<String, dynamic>;
+          _logWsEvent('RECV', msg);
           await _handleMessage(channel, msg);
         } catch (e) {
           _sendTo(channel, {'type': 'error', 'value': 'Invalid message: $e'});
@@ -336,6 +340,9 @@ class NoriterServer {
   /// history/agent as the web chat so both surfaces stay in sync, and returns
   /// the final answer text to send back to the Telegram chat.
   Future<String> _runAgentForTelegram(String message) async {
+    if (_wsDebug) {
+      stdout.writeln('[agent][telegram] incoming: ${_truncateForLog(message)}');
+    }
     if (config.engineMode == EngineMode.embedded &&
         _engineState.status != EngineStatus.ready) {
       return engineManager.isInstalled
@@ -495,6 +502,9 @@ class NoriterServer {
   }
 
   Future<void> _handleSendMessage(String message) async {
+    if (_wsDebug) {
+      stdout.writeln('[agent][web] incoming: ${_truncateForLog(message)}');
+    }
     if (message.toLowerCase() == '/models') {
       await _history.append('user', message);
       _broadcast({'type': 'sessionStart', 'userPrompt': message});
@@ -579,12 +589,14 @@ class NoriterServer {
   }
 
   void _sendTo(WebSocketChannel channel, Map<String, dynamic> data) {
+    _logWsEvent('SEND', data);
     try {
       channel.sink.add(jsonEncode(data));
     } catch (_) {}
   }
 
   void _broadcast(Map<String, dynamic> data) {
+    _logWsEvent('BROADCAST', data);
     final encoded = jsonEncode(data);
     for (final client in List.of(_clients)) {
       try {
@@ -593,6 +605,34 @@ class NoriterServer {
         _clients.remove(client);
       }
     }
+  }
+
+  /// Debug logging (WS_DEBUG=1) that prints every outgoing/incoming WebSocket
+  /// event to stdout, so agent activity that's hidden or collapsed in the UI
+  /// can be traced from the terminal instead.
+  static final bool _wsDebug = Platform.environment['WS_DEBUG'] == '1';
+
+  void _logWsEvent(String direction, Map<String, dynamic> data) {
+    if (!_wsDebug) return;
+    final type = data['type'] ?? '?';
+    final preview = _previewJson(data);
+    final timestamp = DateTime.now().toIso8601String().substring(11, 23);
+    stdout.writeln('[ws][$timestamp][$direction][$type] $preview');
+  }
+
+  String _truncateForLog(String text, {int maxLength = 200}) {
+    final oneLine = text.replaceAll('\n', ' \\n ');
+    return oneLine.length > maxLength ? '${oneLine.substring(0, maxLength)}...(${oneLine.length} chars)' : oneLine;
+  }
+
+  String _previewJson(Map<String, dynamic> data, {int maxLength = 300}) {
+    String encoded;
+    try {
+      encoded = jsonEncode(data);
+    } catch (e) {
+      encoded = '<unencodable: $e>';
+    }
+    return encoded.length > maxLength ? '${encoded.substring(0, maxLength)}...(${encoded.length} chars)' : encoded;
   }
 }
 
