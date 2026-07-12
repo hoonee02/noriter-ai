@@ -5,6 +5,13 @@ Chronological record of bugs found and fixed during development, kept alongside
 
 ---
 
+## Telegram file (document) attachments silently dropped, producing an empty response
+**Symptom:** Sending an Excel file to the Telegram bot with a caption like "이건 어떤 파일인지 설명" replied with `Error: Received empty response from local model. Make sure the model is loaded and running in LM Studio.`
+**Root cause:** Telegram sends non-photo file attachments as a `document` field on the message, completely separate from `photo`. `telegram_bridge.dart` only ever checked `text`/`caption`/`photo` -- it silently ignored `document` entirely, so the actual file content was thrown away and only the bare caption text ("이건 어떤 파일인지 설명") reached the model with no file content to work with, in some cases returning a genuinely empty completion. Separately, the error message itself was stale -- it referenced "LM Studio", a leftover from before the Ollama backend swap (v0.1.0).
+**Fix:** `telegram_bridge.dart` now detects `message.document`, downloads it via `getFile`, and embeds its content the same way the web chat's file attachment does: `.xlsx` is parsed with `excelBytesToText()`, everything else is decoded as UTF-8 text, both truncated at 8000 characters. The download logic for photos and documents was unified into a single `_downloadFile()` helper. Also updated the stale "LM Studio" error message in `local_agent.dart` to be backend-agnostic. (`telegram_bridge.dart`, `local_agent.dart`)
+
+---
+
 ## Image analysis regurgitating prompt fragments / gibberish with small vision models
 **Symptom:** With `moondream:1.8b` loaded, the first image analysis in a session worked correctly, but a later image request in the same conversation returned a fragment of the app's own system prompt (`"...and not use any tools for analysis unless explicitly requested...Action Input: {}"`) or outright gibberish (`가장나치로 파이썬의 경로들이 없다.`) instead of describing the image.
 **Root cause:** Vision models tend to be much smaller than text models -- `moondream:1.8b` has only a **2K-token context window** by default. The app was sending the *full* tool-calling system prompt (tool list, ReAct Thought/Action/Observation format, worked example) plus the entire prior conversation history on every request, including image ones. None of that scaffolding is needed for a simple "describe this image" task, and it was blowing straight through the tiny context budget, causing the model to lose coherence and echo back its own instructions or hallucinate.

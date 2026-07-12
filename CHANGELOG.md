@@ -12,6 +12,7 @@ See [BUGFIXES.md](BUGFIXES.md) for a detailed, symptom → root cause → fix lo
 
 ### Fixed
 - Attaching an image while a non-vision model was loaded showed a raw JSON API error ("Multimodal data provided, but model does not support multimodal requests"). Now checked upfront via Ollama's `/api/show` capabilities and shown as a clear message telling you to switch to a vision-capable model (e.g. `gemma3:4b`) instead.
+- **Telegram file attachments were silently dropped.** Telegram sends non-photo attachments (e.g. .xlsx) as a `document` field, which the bridge never checked -- only the caption text reached the model, sometimes producing a confusing empty-response error. Documents are now downloaded and embedded the same way the web chat handles file attachments (Excel parsed via `excelBytesToText()`, everything else as UTF-8 text). Also fixed a stale error message that referenced "LM Studio" from before the Ollama backend swap.
 
 ## [0.1.1] - 2026-07-12
 ### Added

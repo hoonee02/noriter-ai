@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:noriter_ai_desktop/src/excel_service.dart';
 
 typedef TelegramMessageHandler = Future<String> Function(String text, {List<String> imageDataUrls});
 typedef TelegramStatusCallback = void Function(String status);
@@ -110,8 +111,12 @@ class TelegramBridge {
       final photosRaw = message['photo'];
       final photos = photosRaw is List ? photosRaw : const [];
       final hasPhoto = photos.isNotEmpty;
+      // Files sent as attachments (not photos) arrive as "document" --
+      // this is how Telegram sends .xlsx/.csv/.txt/etc.
+      final document = message['document'];
+      final hasDocument = document is Map<String, dynamic>;
       final rawText = (message['text'] as String?) ?? (message['caption'] as String?) ?? '';
-      if (!hasPhoto && rawText.trim().isEmpty) continue;
+      if (!hasPhoto && !hasDocument && rawText.trim().isEmpty) continue;
 
       final chat = message['chat'];
       final chatId = chat is Map<String, dynamic> ? _normalizeChatId('${chat['id']}') : '';
@@ -136,17 +141,36 @@ class TelegramBridge {
         final fileId = largest is Map<String, dynamic> ? largest['file_id'] as String? : null;
         if (fileId != null) {
           try {
-            final dataUrl = await _downloadFileAsDataUrl(fileId);
-            if (dataUrl != null) imageDataUrls = [dataUrl];
+            final file = await _downloadFile(fileId);
+            if (file != null) imageDataUrls = [_bytesToImageDataUrl(file.bytes, file.filePath)];
           } catch (e) {
             onStatus?.call('Failed to download Telegram photo: $e');
           }
         }
       }
 
-      final text = rawText.trim().isNotEmpty
-          ? rawText.trim()
-          : (imageDataUrls.isNotEmpty ? 'Please analyze the attached image.' : '');
+      String? fileAttachmentText;
+      if (hasDocument) {
+        final fileId = document['file_id'] as String?;
+        final fileName = (document['file_name'] as String?) ?? 'file';
+        if (fileId != null) {
+          try {
+            final file = await _downloadFile(fileId);
+            if (file != null) {
+              fileAttachmentText = _composeFileAttachmentText(fileName, file.bytes);
+            }
+          } catch (e) {
+            onStatus?.call('Failed to download Telegram document: $e');
+          }
+        }
+      }
+
+      var text = rawText.trim();
+      if (fileAttachmentText != null) {
+        text = text.isEmpty ? 'Please review the attached file.\n\n$fileAttachmentText' : '$text\n\n$fileAttachmentText';
+      } else if (text.isEmpty && imageDataUrls.isNotEmpty) {
+        text = 'Please analyze the attached image.';
+      }
       if (text.isEmpty) continue;
 
       String reply;
@@ -159,10 +183,11 @@ class TelegramBridge {
     }
   }
 
-  /// Downloads a Telegram file (photo) by its file_id via getFile + the
-  /// file download endpoint, and returns it as a base64 data URL suitable
-  /// for embedding in a multimodal chat message.
-  Future<String?> _downloadFileAsDataUrl(String fileId) async {
+  /// Downloads a Telegram file (photo or document) by its file_id via
+  /// getFile + the file download endpoint, returning the raw bytes plus
+  /// the Telegram-side file_path (its extension is used to pick a MIME
+  /// type / parsing strategy by callers).
+  Future<_TelegramFile?> _downloadFile(String fileId) async {
     final getFileUri = Uri.https('api.telegram.org', '/bot$_botToken/getFile', {'file_id': fileId});
     final getFileResponse = await http.get(getFileUri).timeout(const Duration(seconds: 15));
     if (getFileResponse.statusCode != 200) return null;
@@ -178,6 +203,10 @@ class TelegramBridge {
     final fileResponse = await http.get(fileUri).timeout(const Duration(seconds: 30));
     if (fileResponse.statusCode != 200) return null;
 
+    return _TelegramFile(bytes: fileResponse.bodyBytes, filePath: filePath);
+  }
+
+  String _bytesToImageDataUrl(List<int> bytes, String filePath) {
     final ext = filePath.contains('.') ? filePath.split('.').last.toLowerCase() : 'jpg';
     final mimeType = switch (ext) {
       'png' => 'image/png',
@@ -185,8 +214,28 @@ class TelegramBridge {
       'webp' => 'image/webp',
       _ => 'image/jpeg',
     };
-    final base64Data = base64Encode(fileResponse.bodyBytes);
-    return 'data:$mimeType;base64,$base64Data';
+    return 'data:$mimeType;base64,${base64Encode(bytes)}';
+  }
+
+  /// Converts a downloaded document into the same "[Attached file: ...]"
+  /// text block the web chat uses for non-image attachments -- .xlsx is
+  /// parsed into a plain-text table via excelBytesToText(), everything
+  /// else is treated as UTF-8 text. Truncated the same way (8000 chars) to
+  /// avoid the context-bloat issue fixed for the web attachment path.
+  String _composeFileAttachmentText(String fileName, List<int> bytes) {
+    final ext = fileName.contains('.') ? fileName.split('.').last.toLowerCase() : '';
+    String content;
+    try {
+      content = ext == 'xlsx' ? excelBytesToText(bytes) : utf8.decode(bytes, allowMalformed: true);
+    } catch (e) {
+      content = '(failed to read file: $e)';
+    }
+
+    const maxChars = 8000;
+    final truncated = content.length > maxChars;
+    final body = truncated ? content.substring(0, maxChars) : content;
+    final notice = truncated ? '\n\n(File truncated to $maxChars characters)' : '';
+    return '[Attached file: $fileName]\n```\n$body\n```$notice';
   }
 
   Future<void> _sendMessage(String chatId, String text) async {
@@ -202,4 +251,10 @@ class TelegramBridge {
       onStatus?.call('Failed to send Telegram reply: $e');
     }
   }
+}
+
+class _TelegramFile {
+  _TelegramFile({required this.bytes, required this.filePath});
+  final List<int> bytes;
+  final String filePath;
 }

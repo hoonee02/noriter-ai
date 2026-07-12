@@ -188,7 +188,8 @@ class LocalAgent {
 
         if (content.trim().isEmpty) {
           progress.onError(
-            'Received empty response from local model. Make sure the model is loaded and running in LM Studio.',
+            'Received an empty response from the model. Make sure a model is loaded and running '
+            '(check the [Engine] panel), or try again with a shorter message.',
           );
           return;
         }

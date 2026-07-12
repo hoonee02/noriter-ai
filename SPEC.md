@@ -44,6 +44,9 @@ noriter-ai-0.1.2.exe
     │   ├── Routes messages through the same LocalAgent/history as the web chat
     │   ├── Photos are downloaded via getFile and sent as a multimodal message
     │   │   (same vision-capability check as the web chat's image attachment)
+    │   ├── Documents (Telegram's "document" message field, e.g. .xlsx) are
+    │   │   also downloaded and embedded the same way as the web chat's file
+    │   │   attachment (.xlsx via excelBytesToText(), else UTF-8 text)
     │   └── Settings persisted to .noriter-ai/telegram-config.json (gitignored)
     │
     ├── Local file/image/spreadsheet attachment (chat UI)
