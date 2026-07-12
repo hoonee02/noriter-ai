@@ -252,8 +252,9 @@ class OllamaEngineManager {
     // gemma3:1b is text-only -- vision starts at gemma3:4b -- so this must
     // check the full tag, not just the family name. Likewise EXAONE is
     // text-only below 4.5-33B (the only image-capable EXAONE release).
+    // gemma4 is vision-capable across all its tags, no text-only exception.
     if (lower.startsWith('gemma3:1b')) return false;
-    return RegExp(r'gemma3(?!:1b)|llava|vision|moondream|bakllava|minicpm-v|exaone-4\.5-33b')
+    return RegExp(r'gemma3(?!:1b)|gemma4|llava|vision|moondream|bakllava|minicpm-v|exaone-4\.5-33b')
         .hasMatch(lower);
   }
 
@@ -304,5 +305,12 @@ class OllamaEngineManager {
     // the 33B EXAONE above, this is actually comfortable to use for quick
     // image description/analysis on this machine.
     {'name': 'Moondream-1.8B (tiny, fast, image-capable -- fits comfortably)', 'tag': 'moondream:1.8b'},
+    // Gemma 4 (newer generation than Gemma 3): 12b's download (~7.6GB) is
+    // barely larger than the e2b edge variant (~7.2GB) but doubles the
+    // context window (256K vs 128K) and has more real parameters, making it
+    // the better pick at essentially the same resource cost -- still a bit
+    // over the 6GB VRAM budget so some layers spill to system RAM, but far
+    // more comfortable than the EXAONE-4.5-33B/Q2_K option above.
+    {'name': 'Gemma-4-12B (newer than Gemma 3, image-capable, 256K context)', 'tag': 'gemma4:12b'},
   ];
 }
