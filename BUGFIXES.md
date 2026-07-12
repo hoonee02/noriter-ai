@@ -5,6 +5,13 @@ Chronological record of bugs found and fixed during development, kept alongside
 
 ---
 
+## Image analysis regurgitating prompt fragments / gibberish with small vision models
+**Symptom:** With `moondream:1.8b` loaded, the first image analysis in a session worked correctly, but a later image request in the same conversation returned a fragment of the app's own system prompt (`"...and not use any tools for analysis unless explicitly requested...Action Input: {}"`) or outright gibberish (`가장나치로 파이썬의 경로들이 없다.`) instead of describing the image.
+**Root cause:** Vision models tend to be much smaller than text models -- `moondream:1.8b` has only a **2K-token context window** by default. The app was sending the *full* tool-calling system prompt (tool list, ReAct Thought/Action/Observation format, worked example) plus the entire prior conversation history on every request, including image ones. None of that scaffolding is needed for a simple "describe this image" task, and it was blowing straight through the tiny context budget, causing the model to lose coherence and echo back its own instructions or hallucinate.
+**Fix:** `LocalAgent.run()` now uses a short, direct system prompt for image requests (no tool list, no ReAct format) and drops prior conversation history entirely for that turn, leaving the model's limited context budget almost entirely for the image + question. The full tool-calling prompt (extracted into `_buildToolAgentSystemPrompt()`) is unchanged for ordinary text messages. (`local_agent.dart`)
+
+---
+
 ## Raw JSON API error when attaching an image to a non-vision model
 **Symptom:** Attaching an image and sending it produced a raw error bubble: `API Error: {"error":{"message":"{...\"Multimodal data provided, but model does not support multimodal requests.\"...}"}}`.
 **Root cause:** Not a bug in the strict sense -- the image-attachment feature (see CHANGELOG v0.1.1) sends the image to whatever model is currently loaded, but most models (including EXAONE 3.5, Llama 3.2, Phi-3, and Gemma 3 below 4B) are text-only. Ollama correctly rejects the request; the app just surfaced that rejection as an unhelpful raw JSON blob instead of explaining what happened.

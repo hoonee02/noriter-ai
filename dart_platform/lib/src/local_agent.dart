@@ -64,56 +64,26 @@ class LocalAgent {
     }
 
     final allowedTools = _resolveAllowedTools(userMessage);
-    final toolsDesc =
-        allowedTools.map((t) => '- ${t.name}: ${t.description}. Params: ${t.parameters}').join('\n');
     final toolNames = allowedTools.map((t) => t.name).join(', ');
-    final memorySummary = memoryService.getSummary();
-    final goalInstructions = goalService.getGoal();
 
-    final systemPrompt = '''You are an AI Agent operating inside a VSCode workspace.
-You have access to the following tools to interact with the codebase:
-$toolsDesc
+    // Image requests skip the full tool-calling/ReAct scaffolding entirely:
+    // vision models are typically much smaller (moondream:1.8b has only a
+    // 2K-token context window) and never need to call a tool to describe an
+    // image. Sending the full tool list + ReAct format instructions blew
+    // straight through that tiny context budget, causing the model to
+    // regurgitate fragments of its own instructions or produce gibberish
+    // instead of answering. A short, direct prompt keeps this comfortably
+    // within budget and matches what the task actually needs.
+    final systemPrompt = imageDataUrls.isNotEmpty
+        ? '''You are a helpful assistant. One or more images are attached directly to this message -- look at them and answer the user's question based on what you actually see. Answer directly in plain language. Do not use any tools, and do not write "Thought:"/"Action:"/"Final Answer:" formatting -- just answer.'''
+        : _buildToolAgentSystemPrompt(allowedTools, toolNames);
 
-Persistent Memory Snapshot:
-$memorySummary
-
-Custom Goal Instructions (from .noriter-ai/agent-goal.md):
-$goalInstructions
-
-Use saveMemory for facts that should persist across tasks, and use getMemory/listMemoryKeys before asking for details that may already be known.
-
-IMPORTANT BEHAVIOR RULES:
-- If the user message is casual conversation (greeting, chit-chat, opinion, or simple Q/A), respond directly with "Final Answer:" and DO NOT use tools.
-- Use tools only when the user explicitly asks for workspace/file/command actions or when a tool is truly needed for accuracy.
-- Never call sendTelegramMessage unless the user explicitly asks to send a Telegram message.
-- If the user message contains a "[Attached file: ...]" block, its content is already inlined right there -- never call readFile/writeFile or any other tool to access it, just work with the inlined text directly.
-${imageDataUrls.isNotEmpty ? '- One or more images are attached directly to this message. Look at them and answer based on what you actually see -- do not call any tool for this, and do not claim you cannot see images.' : ''}
-
-To complete the user's task, you must output step-by-step using this exact ReAct format:
-
-Thought: Describe your reasoning for the current step.
-Action: The name of the tool to execute. Must be one of: [$toolNames]
-Action Input: The arguments for the tool as a SINGLE valid JSON object. Ensure all quotes are valid. NEVER use string concatenation (the "+" operator) or split a string across multiple quoted pieces -- write one JSON string, using \n for newlines.
-Observation: [The system will provide the tool output here. DO NOT write this line yourself. Stop outputting after Action Input.]
-
-Example format:
-Thought: I need to check the files in the workspace.
-Action: getWorkspaceFiles
-Action Input: {}
-Observation: [ "package.json", "src/extension.ts" ]
-Thought: I need to read the contents of package.json.
-Action: readFile
-Action Input: { "relativePath": "package.json" }
-Observation: ...
-Thought: I now have the final answer.
-Final Answer: The package.json lists ...
-
-IMPORTANT: You can only call one tool at a time. Do not write "Observation:" yourself. You must write "Action:" and "Action Input:" and then STOP writing so the system can run the tool.
-If no tool is needed, return "Final Answer:" immediately.
-''';
-
+    // Also drop prior conversation history for image turns -- tiny vision
+    // models have very little context budget to begin with, and the image
+    // itself already eats into it; an old chat history isn't worth the risk
+    // of overflowing a 2K-token window and getting gibberish back.
     final normalizedContext = _normalizeAlternatingMessages(
-      contextMessages.map((m) => Map<String, dynamic>.from(m)).toList(),
+      imageDataUrls.isNotEmpty ? const [] : contextMessages.map((m) => Map<String, dynamic>.from(m)).toList(),
     );
     final messages = <Map<String, dynamic>>[
       ...normalizedContext,
@@ -338,6 +308,54 @@ If no tool is needed, return "Final Answer:" immediately.
       }
     }
     progress.onError('Maximum iterations reached without a final answer.');
+  }
+
+  String _buildToolAgentSystemPrompt(List<Tool> allowedTools, String toolNames) {
+    final toolsDesc =
+        allowedTools.map((t) => '- ${t.name}: ${t.description}. Params: ${t.parameters}').join('\n');
+    final memorySummary = memoryService.getSummary();
+    final goalInstructions = goalService.getGoal();
+
+    return '''You are an AI Agent operating inside a VSCode workspace.
+You have access to the following tools to interact with the codebase:
+$toolsDesc
+
+Persistent Memory Snapshot:
+$memorySummary
+
+Custom Goal Instructions (from .noriter-ai/agent-goal.md):
+$goalInstructions
+
+Use saveMemory for facts that should persist across tasks, and use getMemory/listMemoryKeys before asking for details that may already be known.
+
+IMPORTANT BEHAVIOR RULES:
+- If the user message is casual conversation (greeting, chit-chat, opinion, or simple Q/A), respond directly with "Final Answer:" and DO NOT use tools.
+- Use tools only when the user explicitly asks for workspace/file/command actions or when a tool is truly needed for accuracy.
+- Never call sendTelegramMessage unless the user explicitly asks to send a Telegram message.
+- If the user message contains a "[Attached file: ...]" block, its content is already inlined right there -- never call readFile/writeFile or any other tool to access it, just work with the inlined text directly.
+
+To complete the user's task, you must output step-by-step using this exact ReAct format:
+
+Thought: Describe your reasoning for the current step.
+Action: The name of the tool to execute. Must be one of: [$toolNames]
+Action Input: The arguments for the tool as a SINGLE valid JSON object. Ensure all quotes are valid. NEVER use string concatenation (the "+" operator) or split a string across multiple quoted pieces -- write one JSON string, using \n for newlines.
+Observation: [The system will provide the tool output here. DO NOT write this line yourself. Stop outputting after Action Input.]
+
+Example format:
+Thought: I need to check the files in the workspace.
+Action: getWorkspaceFiles
+Action Input: {}
+Observation: [ "package.json", "src/extension.ts" ]
+Thought: I need to read the contents of package.json.
+Action: readFile
+Action Input: { "relativePath": "package.json" }
+Observation: ...
+Thought: I now have the final answer.
+Final Answer: The package.json lists ...
+
+IMPORTANT: You can only call one tool at a time. Do not write "Observation:" yourself. You must write "Action:" and "Action Input:" and then STOP writing so the system can run the tool.
+If no tool is needed, return "Final Answer:" immediately.
+''';
   }
 }
 
