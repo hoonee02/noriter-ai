@@ -5,6 +5,12 @@ Chronological record of bugs found and fixed during development, kept alongside
 
 ---
 
+## Concurrent requests from web + Telegram could race against shared agent state
+**Symptom:** Not user-reported yet, but latent: `_handleSendMessage` (web) and `_runAgentForTelegram` (Telegram) both read/wrote the same `_agent` and `_cancelled` fields with no serialization. Two requests arriving close together (one from each surface, or two rapid web messages) could run `_agent.run()` concurrently, corrupting `_cancelled`'s meaning (a stop from one request would cancel the other) and interleaving history/broadcast events between turns.
+**Fix:** Added a request queue (`_runQueued()`) that both entry points go through -- requests are chained via a single `Future` tail so only one runs at a time, in arrival order, regardless of which surface they came from. Queue state (waiting/running entries with a preview) is broadcast to the UI as a visible "📋 Request Queue" panel, turning an invisible race into a visible, well-defined FIFO. (`server.dart`, `assets.dart`)
+
+---
+
 ## Telegram file (document) attachments silently dropped, producing an empty response
 **Symptom:** Sending an Excel file to the Telegram bot with a caption like "이건 어떤 파일인지 설명" replied with `Error: Received empty response from local model. Make sure the model is loaded and running in LM Studio.`
 **Root cause:** Telegram sends non-photo file attachments as a `document` field on the message, completely separate from `photo`. `telegram_bridge.dart` only ever checked `text`/`caption`/`photo` -- it silently ignored `document` entirely, so the actual file content was thrown away and only the bare caption text ("이건 어떤 파일인지 설명") reached the model with no file content to work with, in some cases returning a genuinely empty completion. Separately, the error message itself was stale -- it referenced "LM Studio", a leftover from before the Ollama backend swap (v0.1.0).

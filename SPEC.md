@@ -38,6 +38,11 @@ noriter-ai-0.1.2.exe
     │   ├── Repairs/self-corrects malformed tool-call JSON instead of aborting the turn
     │   └── Uses 9 built-in tools (see Tools section)
     │
+    ├── Request queue (NoriterServer._runQueued)
+    │   ├── Serializes web chat + Telegram requests through one FIFO so they
+    │   │   never run the agent concurrently against shared _agent/_cancelled state
+    │   └── Broadcasts queue state (queueUpdate) for the "📋 Request Queue" UI panel
+    │
     ├── TelegramBridge
     │   ├── Long-polls the Telegram Bot API (getUpdates)
     │   ├── Auto-binds to the first chat that messages the bot if no chat ID is configured
@@ -154,6 +159,7 @@ of a filesystem path -- a much lower-friction "pick a model, click Run" flow.
 | `localModelsList` | `{ models }` | List of downloaded models |
 | `telegramStatus` | `{ config, running, statusMessage }` | Telegram bridge state (`config` is redacted — no full token) |
 | `lastEngineFound` | `{ modelPath, contextSize }` | Sent once per app run if a remembered engine exists and none is running yet; frontend shows a confirm dialog before auto-starting it |
+| `queueUpdate` | `{ items: [{ id, preview, source, status }] }` | Current request queue (web chat + Telegram share one FIFO); `status` is `waiting` or `running`, `source` is `web` or `telegram` |
 
 ---
 

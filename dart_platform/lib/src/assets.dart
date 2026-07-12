@@ -101,6 +101,11 @@ const String kChatHtml = r'''<!DOCTYPE html>
             </div>
         </div>
 
+        <div id="queue-panel" class="queue-panel" style="display:none;">
+            <div class="queue-panel-title">&#128203; Request Queue</div>
+            <div id="queue-list"></div>
+        </div>
+
         <div id="chat-messages" class="chat-messages"></div>
 
         <div class="agent-activity-container" id="agent-activity" style="display: none;">
@@ -247,6 +252,48 @@ body {
     display: flex;
     flex-direction: column;
     gap: 12px;
+}
+
+.queue-panel {
+    padding: 8px 14px;
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid var(--vscode-panel-border, rgba(255, 255, 255, 0.1));
+    font-size: 11px;
+}
+
+.queue-panel-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: var(--vscode-descriptionForeground);
+}
+
+.queue-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+}
+
+.queue-item-badge {
+    flex: none;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--vscode-descriptionForeground);
+}
+
+.queue-item.running .queue-item-badge {
+    background: var(--vscode-progressBar-background, #89b4fa);
+    color: var(--vscode-button-foreground, #1e1e2e);
+}
+
+.queue-item-preview {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--vscode-sideBar-foreground);
 }
 
 .system-message {
@@ -504,6 +551,8 @@ body {
 
 const String kMainJs = r'''(function () {
     const chatMessages = document.getElementById('chat-messages');
+    const queuePanel = document.getElementById('queue-panel');
+    const queueList = document.getElementById('queue-list');
     const chatInput = document.getElementById('chat-input');
     const sendButton = document.getElementById('send-btn');
     const stopButton = document.getElementById('stop-btn');
@@ -663,6 +712,9 @@ const String kMainJs = r'''(function () {
                     break;
                 case 'telegramStatus':
                     updateTelegramPanel(message);
+                    break;
+                case 'queueUpdate':
+                    updateQueuePanel(message.items || []);
                     break;
                 case 'lastEngineFound':
                     var modelLabel = message.modelPath.split('/').pop().split('\\').pop();
@@ -1055,6 +1107,31 @@ const String kMainJs = r'''(function () {
             telegramBotToken.placeholder = cfg.botTokenSet ? ('Saved: ' + cfg.botTokenPreview + ' (enter to replace)') : 'From @BotFather';
         }
         telegramEnabled.checked = !!cfg.enabled;
+    }
+
+    function updateQueuePanel(items) {
+        if (!queuePanel || !queueList) return;
+        if (!items || items.length === 0) {
+            queuePanel.style.display = 'none';
+            queueList.innerHTML = '';
+            return;
+        }
+        queuePanel.style.display = 'block';
+        queueList.innerHTML = '';
+        items.forEach(function (item) {
+            var row = document.createElement('div');
+            row.className = 'queue-item' + (item.status === 'running' ? ' running' : '');
+            var badge = document.createElement('span');
+            badge.className = 'queue-item-badge';
+            var sourceIcon = item.source === 'telegram' ? '✈️' : '💬';
+            badge.textContent = sourceIcon + ' ' + (item.status === 'running' ? 'Running' : 'Waiting');
+            var preview = document.createElement('span');
+            preview.className = 'queue-item-preview';
+            preview.textContent = item.preview || '';
+            row.appendChild(badge);
+            row.appendChild(preview);
+            queueList.appendChild(row);
+        });
     }
 
     // Informational only -- picking/running a model happens via the

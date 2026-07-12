@@ -50,6 +50,14 @@ class NoriterServer {
   final Set<WebSocketChannel> _clients = {};
   bool _cancelled = false;
 
+  /// Generation requests (web chat + Telegram) are serialized through this
+  /// queue so two requests never run the agent concurrently against the
+  /// same `_agent`/`_cancelled` state, and so the user can see what's
+  /// pending instead of things silently interleaving or blocking.
+  final List<_QueueEntry> _queue = [];
+  Future<void> _queueTail = Future<void>.value();
+  int _nextQueueId = 1;
+
   // Live endpoint (may change when embedded engine starts)
   late String _activeEndpoint;
 
@@ -173,6 +181,13 @@ class NoriterServer {
       'entries': _history.getEntries(),
     });
 
+    _sendTo(channel, {
+      'type': 'queueUpdate',
+      'items': _queue
+          .map((e) => {'id': e.id, 'preview': e.preview, 'source': e.source, 'status': e.status})
+          .toList(),
+    });
+
     // Send engine state immediately on connect
     _sendTo(channel, _engineStatusPayload());
 
@@ -257,11 +272,17 @@ class NoriterServer {
           }
         }
         if (finalValue != null && finalValue.trim().isNotEmpty) {
-          await _handleSendMessage(
-            finalValue.trim(),
-            historyMessage: historyValue?.trim(),
-            imageDataUrls: imageDataUrls,
-          );
+          final queuedValue = finalValue.trim();
+          final queuedHistoryValue = historyValue?.trim();
+          unawaited(_runQueued<void>(
+            queuedValue,
+            'web',
+            () => _handleSendMessage(
+              queuedValue,
+              historyMessage: queuedHistoryValue,
+              imageDataUrls: imageDataUrls,
+            ),
+          ));
         }
         break;
 
@@ -339,6 +360,53 @@ class NoriterServer {
     _broadcast(_telegramStatusPayload());
   }
 
+  /// Enqueues [task] behind whatever's already running and broadcasts the
+  /// queue's state (waiting/running entries with a short preview) so the UI
+  /// can show it. Requests from both the web chat and Telegram share this
+  /// same queue -- they can't run the agent concurrently anyway since both
+  /// go through the single `_agent`/`_cancelled` fields, so this also fixes
+  /// the race that existed there, not just the visibility.
+  Future<T> _runQueued<T>(String preview, String source, Future<T> Function() task) {
+    final entry = _QueueEntry(
+      id: _nextQueueId++,
+      preview: preview.length > 80 ? '${preview.substring(0, 80)}…' : preview,
+      source: source,
+    );
+    _queue.add(entry);
+    _broadcastQueue();
+
+    final resultCompleter = Completer<T>();
+    final previousTail = _queueTail;
+    _queueTail = previousTail.then((_) async {
+      entry.status = 'running';
+      _broadcastQueue();
+      try {
+        final result = await task();
+        resultCompleter.complete(result);
+      } catch (e) {
+        resultCompleter.completeError(e);
+      } finally {
+        _queue.remove(entry);
+        _broadcastQueue();
+      }
+    });
+    return resultCompleter.future;
+  }
+
+  void _broadcastQueue() {
+    _broadcast({
+      'type': 'queueUpdate',
+      'items': _queue
+          .map((e) => {
+                'id': e.id,
+                'preview': e.preview,
+                'source': e.source,
+                'status': e.status,
+              })
+          .toList(),
+    });
+  }
+
   Future<void> _runUpdateTelegramConfig(Map<String, dynamic> msg) async {
     final botToken = msg['botToken'];
     final chatId = msg['chatId'];
@@ -367,7 +435,15 @@ class NoriterServer {
   /// Runs the shared agent for a Telegram-originated message. Reuses the same
   /// history/agent as the web chat so both surfaces stay in sync, and returns
   /// the final answer text to send back to the Telegram chat.
-  Future<String> _runAgentForTelegram(String message, {List<String> imageDataUrls = const []}) async {
+  Future<String> _runAgentForTelegram(String message, {List<String> imageDataUrls = const []}) {
+    return _runQueued<String>(
+      message,
+      'telegram',
+      () => _runAgentForTelegramInner(message, imageDataUrls: imageDataUrls),
+    );
+  }
+
+  Future<String> _runAgentForTelegramInner(String message, {List<String> imageDataUrls = const []}) async {
     if (_wsDebug) {
       stdout.writeln('[agent][telegram] incoming: ${_truncateForLog(message)}${imageDataUrls.isNotEmpty ? ' (+${imageDataUrls.length} image)' : ''}');
     }
@@ -744,4 +820,12 @@ void unawaited(Future<void> future) {
   future.catchError((Object e) {
     stderr.writeln('Unhandled background error: $e');
   });
+}
+
+class _QueueEntry {
+  _QueueEntry({required this.id, required this.preview, required this.source});
+  final int id;
+  final String preview;
+  final String source;
+  String status = 'waiting';
 }
