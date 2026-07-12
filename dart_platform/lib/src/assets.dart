@@ -117,8 +117,8 @@ const String kChatHtml = r'''<!DOCTYPE html>
             <button id="attachment-remove-btn" style="background:transparent; border:none; color:var(--vscode-descriptionForeground); cursor:pointer;">&#10005;</button>
         </div>
         <div class="chat-input-area">
-            <input type="file" id="file-input" style="display:none;" accept=".txt,.md,.markdown,.json,.csv,.log,.js,.ts,.dart,.py,.java,.c,.cpp,.h,.html,.css,.yaml,.yml,.xml,.ini,.env,.png,.jpg,.jpeg,.gif,.webp">
-            <button id="attach-btn" title="Attach a local file or image">&#128206;</button>
+            <input type="file" id="file-input" style="display:none;" accept=".txt,.md,.markdown,.json,.csv,.log,.js,.ts,.dart,.py,.java,.c,.cpp,.h,.html,.css,.yaml,.yml,.xml,.ini,.env,.png,.jpg,.jpeg,.gif,.webp,.xlsx">
+            <button id="attach-btn" title="Attach a local file, image, or spreadsheet">&#128206;</button>
             <textarea id="chat-input" placeholder="Send a message to the local AI agent..." rows="2"></textarea>
             <button id="send-btn">Send</button>
         </div>
@@ -541,6 +541,7 @@ const String kMainJs = r'''(function () {
     let pendingAttachment = null;
     const MAX_ATTACHMENT_BYTES = 500 * 1024;
     const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+    const MAX_EXCEL_BYTES = 8 * 1024 * 1024;
 
     let currentLogBlock = null;
     let ws = null;
@@ -805,21 +806,22 @@ const String kMainJs = r'''(function () {
         fileInput.value = '';
         if (!file) return;
         var isImage = /^image\//.test(file.type);
-        var maxBytes = isImage ? MAX_IMAGE_BYTES : MAX_ATTACHMENT_BYTES;
+        var isExcel = /\.xlsx$/i.test(file.name);
+        var maxBytes = isImage ? MAX_IMAGE_BYTES : (isExcel ? MAX_EXCEL_BYTES : MAX_ATTACHMENT_BYTES);
         if (file.size > maxBytes) {
-            alert('File too large (' + (file.size / 1024).toFixed(0) + ' KB). Max ' + (maxBytes / 1024).toFixed(0) + ' KB for ' + (isImage ? 'images' : 'attachments') + '.');
+            alert('File too large (' + (file.size / 1024).toFixed(0) + ' KB). Max ' + (maxBytes / 1024).toFixed(0) + ' KB for ' + (isImage ? 'images' : (isExcel ? 'spreadsheets' : 'attachments')) + '.');
             return;
         }
         var reader = new FileReader();
         reader.onload = function () {
-            pendingAttachment = { name: file.name, content: String(reader.result), isImage: isImage };
-            attachmentChipName.textContent = (isImage ? '🖼️ ' : '') + file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
+            pendingAttachment = { name: file.name, content: String(reader.result), isImage: isImage, isExcel: isExcel };
+            attachmentChipName.textContent = (isImage ? '🖼️ ' : (isExcel ? '📊 ' : '')) + file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
             attachmentChip.style.display = 'flex';
         };
         reader.onerror = function () {
             alert('Failed to read file: ' + file.name);
         };
-        if (isImage) {
+        if (isImage || isExcel) {
             reader.readAsDataURL(file);
         } else {
             reader.readAsText(file);

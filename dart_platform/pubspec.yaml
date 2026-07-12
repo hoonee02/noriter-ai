@@ -1,6 +1,6 @@
 name: noriter_ai_desktop
 description: Noriter AI standalone Dart desktop GUI app
-version: 0.1.1
+version: 0.1.2
 publish_to: none
 
 environment:
@@ -12,3 +12,4 @@ dependencies:
   shelf_web_socket: ^2.0.0
   web_socket_channel: ^3.0.2
   path: ^1.9.1
+  excel: ^4.0.6

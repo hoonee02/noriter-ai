@@ -13,7 +13,7 @@ See also: [CHANGELOG.md](CHANGELOG.md) for release history, [BUGFIXES.md](BUGFIX
 ## Architecture
 
 ```
-noriter-ai-0.1.1.exe
+noriter-ai-0.1.2.exe
 └── Dart AOT binary (single file, no runtime dependency)
     ├── HTTP server  (shelf)  → localhost:3742
     │   ├── GET  /          → embedded HTML (chat UI)
@@ -46,12 +46,16 @@ noriter-ai-0.1.1.exe
     │   │   (same vision-capability check as the web chat's image attachment)
     │   └── Settings persisted to .noriter-ai/telegram-config.json (gitignored)
     │
-    ├── Local file/image attachment (chat UI)
+    ├── Local file/image/spreadsheet attachment (chat UI)
     │   ├── Paperclip button reads a local text file client-side (FileReader, max 500 KB)
     │   │   and embeds its content in the next chat message
-    │   └── Also accepts images (png/jpg/jpeg/gif/webp, max 4MB) via readAsDataURL,
-    │       sent as a multimodal message part -- requires a vision-capable model
-    │       (e.g. gemma3:4b; smaller Gemma 3 sizes and most other models are text-only)
+    │   ├── Also accepts images (png/jpg/jpeg/gif/webp, max 4MB) via readAsDataURL,
+    │   │   sent as a multimodal message part -- requires a vision-capable model
+    │   │   (e.g. gemma3:4b; smaller Gemma 3 sizes and most other models are text-only)
+    │   └── Also accepts .xlsx (max 8MB) via readAsDataURL; server decodes the base64
+    │       and parses it with the `excel` package into plain text (one section per
+    │       sheet, pipe-separated cells), then handles it like a text attachment.
+    │       PDF is not supported yet (viable Dart libraries need bundled native DLLs).
     │
     ├── LastEngineService
     │   ├── Remembers the last model path + context size that started successfully
@@ -120,7 +124,7 @@ of a filesystem path -- a much lower-friction "pick a model, click Run" flow.
 
 | `type` | Payload | Action |
 |--------|---------|--------|
-| `sendMessage` | `{ value: string, attachment?: { name, content, isImage? } }` | Run agent with user message, optionally embedding an attached local file's text content or (if `isImage`, with `content` as a base64 data URL) sending it as a multimodal image part |
+| `sendMessage` | `{ value: string, attachment?: { name, content, isImage?, isExcel? } }` | Run agent with user message, optionally embedding an attached local file's text content, sending it as a multimodal image part (`isImage`, `content` a base64 data URL), or parsing it as a spreadsheet (`isExcel`, `content` a base64 data URL of the .xlsx bytes) |
 | `stopAgent` | — | Cancel current agent run |
 | `clearHistory` | — | Clear chat history |
 | `downloadEngine` | — | If Ollama isn't installed, opens its download page in the browser; if installed, starts `ollama serve` |
@@ -153,7 +157,7 @@ of a filesystem path -- a much lower-friction "pick a model, click Run" flow.
 ## File Layout
 
 ```
-noriter-ai-0.1.1.exe          ← Standalone Windows EXE (no installer needed)
+noriter-ai-0.1.2.exe          ← Standalone Windows EXE (no installer needed)
 CHANGELOG.md                   ← Version history
 SPEC.md                        ← This file
 
@@ -170,6 +174,7 @@ dart_platform/                 ← Dart source code
     memory_service.dart        ← Agent memory file (Markdown)
     goal_service.dart          ← Agent goal file (Markdown)
     model_provider.dart        ← OpenAI-compatible HTTP client
+    excel_service.dart         ← .xlsx bytes -> plain-text table conversion
     ollama_engine_manager.dart ← Ollama detection/serve/pull/run + recommended model list
     telegram_bridge.dart       ← Telegram Bot API long-polling bridge
     telegram_config_service.dart← Telegram bot token / chat ID persistence
@@ -198,14 +203,14 @@ src/                           ← Legacy VS Code extension (TypeScript, v0.0.5)
 
 ```batch
 REM Just double-click or run from terminal:
-noriter-ai-0.1.1.exe
+noriter-ai-0.1.2.exe
 
 REM Optionally specify a workspace path:
-noriter-ai-0.1.1.exe C:\MyProject
+noriter-ai-0.1.2.exe C:\MyProject
 
 REM Use external LLM (e.g. LM Studio on port 1234):
 set NORITER_MODEL_ENDPOINT=http://localhost:1234/v1
-noriter-ai-0.1.1.exe
+noriter-ai-0.1.2.exe
 ```
 
 The app opens `http://localhost:3742` in your default browser automatically.
@@ -221,5 +226,5 @@ Requires [Dart SDK](https://dart.dev/get-dart) 3.3+.
 ```batch
 cd dart_platform
 dart pub get
-dart compile exe bin/noriter_ai.dart -o ..\noriter-ai-0.1.1.exe
+dart compile exe bin/noriter_ai.dart -o ..\noriter-ai-0.1.2.exe
 ```

@@ -10,6 +10,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:noriter_ai_desktop/src/assets.dart';
 import 'package:noriter_ai_desktop/src/config.dart';
 import 'package:noriter_ai_desktop/src/engine_state.dart';
+import 'package:noriter_ai_desktop/src/excel_service.dart';
 import 'package:noriter_ai_desktop/src/history_service.dart';
 import 'package:noriter_ai_desktop/src/ollama_engine_manager.dart';
 import 'package:noriter_ai_desktop/src/local_agent.dart';
@@ -222,7 +223,19 @@ class NoriterServer {
           final fileName = (attachment['name'] as String?) ?? 'file';
           final content = (attachment['content'] as String?) ?? '';
           final isImage = attachment['isImage'] == true;
-          if (isImage) {
+          final isExcel = attachment['isExcel'] == true;
+          if (isExcel) {
+            try {
+              final base64Part = content.contains(',') ? content.split(',').last : content;
+              final bytes = base64Decode(base64Part);
+              final text = excelBytesToText(bytes);
+              finalValue = _composeMessageWithAttachment(value, fileName, text);
+              historyValue = _composeAttachmentHistoryPlaceholder(value, fileName, text.length);
+            } catch (e) {
+              _broadcast({'type': 'error', 'value': 'Failed to read Excel file "$fileName": $e'});
+              break;
+            }
+          } else if (isImage) {
             final activeTag = _activeModelTag ?? '';
             final supportsVision = activeTag.isNotEmpty && await engineManager.modelSupportsVision(activeTag);
             if (!supportsVision) {
