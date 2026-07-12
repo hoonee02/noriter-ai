@@ -153,7 +153,7 @@ of a filesystem path -- a much lower-friction "pick a model, click Run" flow.
 | `thought` | `{ value }` | Agent reasoning step |
 | `toolStart` | `{ name, args }` | Tool call started |
 | `toolEnd` | `{ name, output }` | Tool call completed |
-| `finalAnswer` | `{ value }` | Agent final response |
+| `finalAnswer` | `{ value, tokensUsed?, elapsedMs? }` | Agent final response; `tokensUsed`/`elapsedMs` cover the whole turn (all tool-calling iterations), persisted to history and shown under the message |
 | `error` | `{ value }` | Error message |
 | `engineStatus` | `{ state, isInstalled, localModels, engineBackend, modelsDir, engineDir, ... }` | Engine state update (`state.contextSize`, `engineBackend` label, and on-disk `modelsDir`/`engineDir` paths included) |
 | `localModelsList` | `{ models }` | List of downloaded models |

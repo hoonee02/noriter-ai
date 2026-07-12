@@ -480,9 +480,9 @@ class NoriterServer {
           onThought: (text) => _broadcast({'type': 'thought', 'value': text}),
           onToolStart: (name, args) => _broadcast({'type': 'toolStart', 'name': name, 'args': args}),
           onToolEnd: (name, output) => _broadcast({'type': 'toolEnd', 'name': name, 'output': output}),
-          onFinalAnswer: (text) async {
-            await _history.append('assistant', text);
-            _broadcast({'type': 'finalAnswer', 'value': text});
+          onFinalAnswer: (text, {tokensUsed, elapsedMs}) async {
+            await _history.append('assistant', text, tokensUsed: tokensUsed, elapsedMs: elapsedMs);
+            _broadcast({'type': 'finalAnswer', 'value': text, 'tokensUsed': tokensUsed, 'elapsedMs': elapsedMs});
             if (!completer.isCompleted) completer.complete(text.isEmpty ? 'Done.' : text);
           },
           onError: (err) async {
@@ -748,9 +748,9 @@ class NoriterServer {
           onThought: (text) => _broadcast({'type': 'thought', 'value': text}),
           onToolStart: (name, args) => _broadcast({'type': 'toolStart', 'name': name, 'args': args}),
           onToolEnd: (name, output) => _broadcast({'type': 'toolEnd', 'name': name, 'output': output}),
-          onFinalAnswer: (text) async {
-            await _history.append('assistant', text);
-            _broadcast({'type': 'finalAnswer', 'value': text});
+          onFinalAnswer: (text, {tokensUsed, elapsedMs}) async {
+            await _history.append('assistant', text, tokensUsed: tokensUsed, elapsedMs: elapsedMs);
+            _broadcast({'type': 'finalAnswer', 'value': text, 'tokensUsed': tokensUsed, 'elapsedMs': elapsedMs});
           },
           onError: (err) async {
             await _history.append('error', err);

@@ -2,22 +2,39 @@ import 'dart:convert';
 import 'dart:io';
 
 class ChatEntry {
-  ChatEntry({required this.type, required this.text, required this.timestamp});
+  ChatEntry({
+    required this.type,
+    required this.text,
+    required this.timestamp,
+    this.tokensUsed,
+    this.elapsedMs,
+  });
 
   final String type;
   final String text;
   final int timestamp;
 
+  /// Only set on 'assistant' entries that came from a real generation (not
+  /// canned small-talk replies) -- total tokens used and wall-clock time for
+  /// the whole turn (including any tool-calling iterations), so the chat UI
+  /// can show "N tokens · X.Xs" under the reply.
+  final int? tokensUsed;
+  final int? elapsedMs;
+
   Map<String, dynamic> toJson() => {
         'type': type,
         'text': text,
         'timestamp': timestamp,
+        if (tokensUsed != null) 'tokensUsed': tokensUsed,
+        if (elapsedMs != null) 'elapsedMs': elapsedMs,
       };
 
   factory ChatEntry.fromJson(Map<String, dynamic> j) => ChatEntry(
         type: j['type'] as String,
         text: j['text'] as String,
         timestamp: (j['timestamp'] as num).toInt(),
+        tokensUsed: (j['tokensUsed'] as num?)?.toInt(),
+        elapsedMs: (j['elapsedMs'] as num?)?.toInt(),
       );
 }
 
@@ -74,8 +91,14 @@ class HistoryService {
     }
   }
 
-  Future<void> append(String type, String text) async {
-    _history.add(ChatEntry(type: type, text: text, timestamp: DateTime.now().millisecondsSinceEpoch));
+  Future<void> append(String type, String text, {int? tokensUsed, int? elapsedMs}) async {
+    _history.add(ChatEntry(
+      type: type,
+      text: text,
+      timestamp: DateTime.now().millisecondsSinceEpoch,
+      tokensUsed: tokensUsed,
+      elapsedMs: elapsedMs,
+    ));
     _trim();
     await _persist();
   }

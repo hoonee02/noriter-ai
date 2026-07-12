@@ -9,7 +9,11 @@ import 'package:noriter_ai_desktop/src/tools.dart';
 typedef OnThought = void Function(String text);
 typedef OnToolStart = void Function(String name, Map<String, dynamic> args);
 typedef OnToolEnd = void Function(String name, String output);
-typedef OnFinalAnswer = void Function(String text);
+/// [tokensUsed]/[elapsedMs] are only populated for real generations (not
+/// canned small-talk replies or user-cancellation) -- total tokens used and
+/// wall-clock time across the whole turn, including any tool-calling
+/// iterations, so the UI can show "N tokens · X.Xs" under the reply.
+typedef OnFinalAnswer = void Function(String text, {int? tokensUsed, int? elapsedMs});
 typedef OnError = void Function(String error);
 
 class AgentProgress {
@@ -113,6 +117,8 @@ class LocalAgent {
     }
 
     var truncationRetries = 0;
+    final stopwatch = Stopwatch()..start();
+    var totalTokensUsed = 0;
     for (var iteration = 0; iteration < maxIterations; iteration++) {
       if (isCancelled()) {
         progress.onFinalAnswer('Agent stopped by user.');
@@ -171,6 +177,11 @@ class LocalAgent {
         }
 
         final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+        final usage = decoded['usage'];
+        if (usage is Map<String, dynamic>) {
+          final tokens = usage['total_tokens'];
+          if (tokens is num) totalTokensUsed += tokens.toInt();
+        }
         final choices = decoded['choices'];
         String content = '';
         if (choices is List && choices.isNotEmpty) {
@@ -214,7 +225,11 @@ class LocalAgent {
         if (finalAnswerMatch != null) {
           final answer = finalAnswerMatch.group(1)?.trim() ?? '';
           if (answer.isNotEmpty) {
-            progress.onFinalAnswer(answer);
+            progress.onFinalAnswer(
+              answer,
+              tokensUsed: totalTokensUsed > 0 ? totalTokensUsed : null,
+              elapsedMs: stopwatch.elapsedMilliseconds,
+            );
             return;
           }
         }
@@ -265,7 +280,11 @@ class LocalAgent {
           final lc = content.toLowerCase();
           if (lc.contains('final answer:')) {
             final idx = lc.indexOf('final answer:');
-            progress.onFinalAnswer(content.substring(idx + 13).trim());
+            progress.onFinalAnswer(
+              content.substring(idx + 13).trim(),
+              tokensUsed: totalTokensUsed > 0 ? totalTokensUsed : null,
+              elapsedMs: stopwatch.elapsedMilliseconds,
+            );
             return;
           }
 
@@ -289,7 +308,11 @@ class LocalAgent {
             continue;
           }
 
-          progress.onFinalAnswer(trimmedContent.isEmpty ? 'Done.' : trimmedContent);
+          progress.onFinalAnswer(
+            trimmedContent.isEmpty ? 'Done.' : trimmedContent,
+            tokensUsed: totalTokensUsed > 0 ? totalTokensUsed : null,
+            elapsedMs: stopwatch.elapsedMilliseconds,
+          );
           return;
         }
       } catch (e) {
@@ -303,7 +326,11 @@ class LocalAgent {
       if (msg['role'] == 'assistant') {
         final fallback = (msg['content'] ?? '').trim();
         if (fallback.isNotEmpty) {
-          progress.onFinalAnswer(fallback);
+          progress.onFinalAnswer(
+            fallback,
+            tokensUsed: totalTokensUsed > 0 ? totalTokensUsed : null,
+            elapsedMs: stopwatch.elapsedMilliseconds,
+          );
           return;
         }
       }

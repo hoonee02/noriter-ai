@@ -341,6 +341,14 @@ body {
     align-self: flex-start;
 }
 
+.message-meta {
+    align-self: flex-start;
+    font-size: 10px;
+    opacity: 0.55;
+    margin-top: 3px;
+    font-family: var(--vscode-editor-font-family, monospace);
+}
+
 .log-block {
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid rgba(255, 255, 255, 0.05);
@@ -679,7 +687,7 @@ const String kMainJs = r'''(function () {
                     showActivity(true, 'Agent is summarizing results...');
                     break;
                 case 'finalAnswer':
-                    addMessage(message.value, 'assistant');
+                    addMessage(message.value, 'assistant', null, message.tokensUsed, message.elapsedMs);
                     showActivity(false);
                     currentLogBlock = null;
                     break;
@@ -930,7 +938,14 @@ const String kMainJs = r'''(function () {
         return hh + ':' + mm;
     }
 
-    function addMessage(text, sender, timestamp) {
+    function formatMessageMeta(tokensUsed, elapsedMs) {
+        var parts = [];
+        if (tokensUsed != null) parts.push(tokensUsed + ' tokens');
+        if (elapsedMs != null) parts.push((elapsedMs / 1000).toFixed(1) + 's');
+        return parts.join(' · ');
+    }
+
+    function addMessage(text, sender, timestamp, tokensUsed, elapsedMs) {
         var msgDiv = document.createElement('div');
         msgDiv.className = 'message ' + sender;
 
@@ -938,6 +953,14 @@ const String kMainJs = r'''(function () {
         textDiv.className = 'message-text';
         textDiv.textContent = text;
         msgDiv.appendChild(textDiv);
+
+        var metaText = formatMessageMeta(tokensUsed, elapsedMs);
+        if (metaText) {
+            var metaDiv = document.createElement('div');
+            metaDiv.className = 'message-meta';
+            metaDiv.textContent = metaText;
+            msgDiv.appendChild(metaDiv);
+        }
 
         var timeDiv = document.createElement('div');
         timeDiv.className = 'message-time';
@@ -975,7 +998,7 @@ const String kMainJs = r'''(function () {
             }
 
             if (entry.type === 'assistant') {
-                addMessage(entry.text, 'assistant', entry.timestamp);
+                addMessage(entry.text, 'assistant', entry.timestamp, entry.tokensUsed, entry.elapsedMs);
                 return;
             }
 
