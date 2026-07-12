@@ -3,7 +3,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-typedef TelegramMessageHandler = Future<String> Function(String text);
+typedef TelegramMessageHandler = Future<String> Function(String text, {List<String> imageDataUrls});
 typedef TelegramStatusCallback = void Function(String status);
 typedef TelegramChatBoundCallback = void Function(String chatId);
 
@@ -100,10 +100,18 @@ class TelegramBridge {
 
       final message = update['message'];
       if (message is! Map<String, dynamic>) continue;
-      final text = message['text'];
       final from = message['from'];
       final isBot = from is Map<String, dynamic> && from['is_bot'] == true;
-      if (text is! String || text.trim().isEmpty || isBot) continue;
+      if (isBot) continue;
+
+      // Photos arrive as an array of the same image at increasing
+      // resolutions ("PhotoSize"); the last entry is the largest. A photo
+      // may come with or without a caption -- either is a valid message.
+      final photosRaw = message['photo'];
+      final photos = photosRaw is List ? photosRaw : const [];
+      final hasPhoto = photos.isNotEmpty;
+      final rawText = (message['text'] as String?) ?? (message['caption'] as String?) ?? '';
+      if (!hasPhoto && rawText.trim().isEmpty) continue;
 
       final chat = message['chat'];
       final chatId = chat is Map<String, dynamic> ? _normalizeChatId('${chat['id']}') : '';
@@ -122,14 +130,63 @@ class TelegramBridge {
 
       if (!_running) return;
 
+      var imageDataUrls = <String>[];
+      if (hasPhoto) {
+        final largest = photos.last;
+        final fileId = largest is Map<String, dynamic> ? largest['file_id'] as String? : null;
+        if (fileId != null) {
+          try {
+            final dataUrl = await _downloadFileAsDataUrl(fileId);
+            if (dataUrl != null) imageDataUrls = [dataUrl];
+          } catch (e) {
+            onStatus?.call('Failed to download Telegram photo: $e');
+          }
+        }
+      }
+
+      final text = rawText.trim().isNotEmpty
+          ? rawText.trim()
+          : (imageDataUrls.isNotEmpty ? 'Please analyze the attached image.' : '');
+      if (text.isEmpty) continue;
+
       String reply;
       try {
-        reply = await onMessage(text.trim());
+        reply = await onMessage(text, imageDataUrls: imageDataUrls);
       } catch (e) {
         reply = 'Agent error: $e';
       }
       await _sendMessage(chatId, reply);
     }
+  }
+
+  /// Downloads a Telegram file (photo) by its file_id via getFile + the
+  /// file download endpoint, and returns it as a base64 data URL suitable
+  /// for embedding in a multimodal chat message.
+  Future<String?> _downloadFileAsDataUrl(String fileId) async {
+    final getFileUri = Uri.https('api.telegram.org', '/bot$_botToken/getFile', {'file_id': fileId});
+    final getFileResponse = await http.get(getFileUri).timeout(const Duration(seconds: 15));
+    if (getFileResponse.statusCode != 200) return null;
+
+    final decoded = jsonDecode(getFileResponse.body) as Map<String, dynamic>;
+    if (decoded['ok'] != true) return null;
+    final result = decoded['result'];
+    if (result is! Map<String, dynamic>) return null;
+    final filePath = result['file_path'] as String?;
+    if (filePath == null || filePath.isEmpty) return null;
+
+    final fileUri = Uri.https('api.telegram.org', '/file/bot$_botToken/$filePath');
+    final fileResponse = await http.get(fileUri).timeout(const Duration(seconds: 30));
+    if (fileResponse.statusCode != 200) return null;
+
+    final ext = filePath.contains('.') ? filePath.split('.').last.toLowerCase() : 'jpg';
+    final mimeType = switch (ext) {
+      'png' => 'image/png',
+      'gif' => 'image/gif',
+      'webp' => 'image/webp',
+      _ => 'image/jpeg',
+    };
+    final base64Data = base64Encode(fileResponse.bodyBytes);
+    return 'data:$mimeType;base64,$base64Data';
   }
 
   Future<void> _sendMessage(String chatId, String text) async {

@@ -354,9 +354,9 @@ class NoriterServer {
   /// Runs the shared agent for a Telegram-originated message. Reuses the same
   /// history/agent as the web chat so both surfaces stay in sync, and returns
   /// the final answer text to send back to the Telegram chat.
-  Future<String> _runAgentForTelegram(String message) async {
+  Future<String> _runAgentForTelegram(String message, {List<String> imageDataUrls = const []}) async {
     if (_wsDebug) {
-      stdout.writeln('[agent][telegram] incoming: ${_truncateForLog(message)}');
+      stdout.writeln('[agent][telegram] incoming: ${_truncateForLog(message)}${imageDataUrls.isNotEmpty ? ' (+${imageDataUrls.length} image)' : ''}');
     }
     if (config.engineMode == EngineMode.embedded &&
         _engineState.status != EngineStatus.ready) {
@@ -365,9 +365,21 @@ class NoriterServer {
           : 'Ollama is not installed. Open the app and install it from the [Engine] panel.';
     }
 
+    if (imageDataUrls.isNotEmpty) {
+      final activeTag = _activeModelTag ?? '';
+      final supportsVision = activeTag.isNotEmpty && await engineManager.modelSupportsVision(activeTag);
+      if (!supportsVision) {
+        return activeTag.isEmpty
+            ? 'No model is loaded, so the image could not be analyzed. Load a vision-capable model first (e.g. gemma3:4b or moondream:1.8b).'
+            : 'The current model ("$activeTag") does not support images. Switch to a vision-capable model '
+                '(e.g. gemma3:4b or moondream:1.8b) from the [Engine] panel and try again.';
+      }
+    }
+
     _cancelled = false;
-    await _history.append('user', message);
-    _broadcast({'type': 'sessionStart', 'userPrompt': message});
+    final storedMessage = imageDataUrls.isNotEmpty ? '$message\n\n[Attached image via Telegram]' : message;
+    await _history.append('user', storedMessage);
+    _broadcast({'type': 'sessionStart', 'userPrompt': storedMessage});
 
     final contextMessages = _history.buildContextMessages();
     final completer = Completer<String>();
@@ -392,6 +404,7 @@ class NoriterServer {
         ),
         () => _cancelled,
         contextMessages,
+        imageDataUrls: imageDataUrls,
       );
     } catch (e) {
       final err = e.toString();

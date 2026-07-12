@@ -42,6 +42,8 @@ noriter-ai-0.1.1.exe
     │   ├── Long-polls the Telegram Bot API (getUpdates)
     │   ├── Auto-binds to the first chat that messages the bot if no chat ID is configured
     │   ├── Routes messages through the same LocalAgent/history as the web chat
+    │   ├── Photos are downloaded via getFile and sent as a multimodal message
+    │   │   (same vision-capability check as the web chat's image attachment)
     │   └── Settings persisted to .noriter-ai/telegram-config.json (gitignored)
     │
     ├── Local file/image attachment (chat UI)
