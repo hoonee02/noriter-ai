@@ -2,15 +2,103 @@
 
 ## Overview
 
-Noriter AI is a standalone Windows desktop application that runs a local LLM-powered AI agent entirely on-device — no cloud services, no VS Code, no LM Studio required.
+Noriter AI is a Windows desktop application that runs a local LLM-powered AI agent entirely on-device — no cloud services, no VS Code, no LM Studio required.
 
-The app is distributed as a single EXE (`noriter-ai-0.0.x.exe`, ~7–8 MB) with no installer and no code signing. It works on Windows 10/11 without admin rights.
+**v0.1.3 is a from-scratch rewrite** onto Tauri + Rust, replacing the v0.1.2 single-EXE Dart server. See [Architecture (v0.1.3)](#architecture-v013-tauri--rust) below for the current design, and [Architecture (v0.1.2, superseded)](#architecture-v012-superseded) for the still-shipped previous build. The rewrite is **not yet packaged as an installer** -- it currently runs via `cargo tauri dev` from source (see [Build](#build-v013)).
 
 See also: [CHANGELOG.md](CHANGELOG.md) for release history, [BUGFIXES.md](BUGFIXES.md) for a symptom → root cause → fix log of bugs found during development.
 
 ---
 
-## Architecture
+## Architecture (v0.1.3, Tauri + Rust)
+
+```
+src-tauri/                      ← Rust backend (Tauri 2)
+  src/main.rs                   ← App bootstrap: tray icon, close-to-hide,
+  │                                IPC command registration, Telegram
+  │                                autostart from saved config
+  src/ollama.rs                 ← Ollama HTTP client (chat/status/models/
+  │                                running_models), returns ChatResult
+  │                                { content, tokens_used, elapsed_ms }
+  src/telegram.rs               ← teloxide long-poll loop, runs for the
+  │                                process lifetime independent of window
+  │                                visibility; auto-binds to the first
+  │                                chat that messages the bot and persists
+  │                                the chat ID; ignores other chats/bots;
+  │                                echoes the prompt above the reply;
+  │                                replies with setup guidance instead of
+  │                                calling Ollama if no model is picked yet
+  src/queue.rs                  ← Shared FIFO (QueueState) serializing
+  │                                Ollama calls from web chat + Telegram
+  │                                through one lock; broadcasts
+  │                                `queue-update` events for the UI
+  src/config.rs                 ← AppConfig persistence to the OS config
+                                   dir (plaintext JSON -- not yet encrypted,
+                                   see BUGFIXES.md/known gaps)
+
+dart_ui/                        ← Dart Wasm frontend (no dart:io anywhere --
+  │                                Wasm has no filesystem/process/socket
+  │                                access, so all of that lives in Rust)
+  lib/main.dart                 ← UI thread: renders the chat log + the
+  │                                🧠모델/✈텔레그램/⚙설정/📋큐 panels,
+  │                                owns all `window.__TAURI__` IPC calls
+  lib/tauri_bridge.dart         ← invoke()/listen() JS-interop wrapper;
+  │                                no-ops outside the real Tauri webview
+  lib/worker_bridge.dart        ← Main-thread side of the Web Worker
+  │                                request/response protocol
+  lib/worker_main.dart          ← Worker entry point (compiled to a
+  │                                separate Wasm module, worker.dart.wasm)
+  lib/worker/logic.dart         ← Pure business logic run in the worker:
+  │                                message timestamp/stats formatting +
+  │                                HTML-escaping, Ollama request
+  │                                preprocessing (default model, context
+  │                                clamping) -- no DOM/Tauri access here
+  build.sh                      ← Compiles both Wasm modules + assembles
+                                   build/web (Tauri's frontendDist)
+```
+
+**Threading model:** the UI thread (`main.dart.wasm`) owns the DOM and all Tauri IPC; a Web Worker (`worker.dart.wasm`) owns pure data transformation, reached via `postMessage`+JSON (`WorkerBridge.call(type, payload)` on the main side, `logic.handle(type, payload)` in the worker). Neither module can see into the other's Dart runtime -- everything crossing the boundary is jsify'd/dartify'd JSON.
+
+**Generation queue:** every Ollama call (web chat's `ollama_chat` command, and each Telegram message) is wrapped in `queue::run_queued()`, which enqueues a `{id, preview, source, status}` entry, waits on a shared `tokio::sync::Mutex` so only one generation runs at a time, and broadcasts the queue's contents as a `queue-update` event. The 📋 큐 panel renders this live and shows a count badge even when closed.
+
+**System tray:** `[X]` hides the window (`WindowEvent::CloseRequested` → `window.hide()` + `prevent_close()`) instead of quitting; the Telegram bridge is spawned once in `setup()` independent of the window, so it keeps polling while hidden. Tray icon is built imperatively via `TrayIconBuilder` (not the declarative `tauri.conf.json` `trayIcon` key -- using both created two icons, see BUGFIXES.md).
+
+**Not yet ported from the v0.1.2 Dart build** (explicitly deferred, not accidental gaps):
+- Chat history / Telegram conversation context persistence -- every message is a fresh 1-turn exchange, nothing survives a restart
+- Ollama streaming responses (token-by-token) -- `ollama_chat` waits for the full response
+- Telegram photo/document attachments
+- Config file encryption (bot token currently stored as plaintext JSON)
+- Window chrome control (frameless/opacity/always-on-top)
+- Cold-start memory budget / background process-priority tuning
+- Installer packaging (`.msi`/`.exe`) -- only `cargo tauri dev` has been run
+
+### Logging (v0.1.3)
+
+No structured logging or log file yet -- everything below is ad-hoc `println!`/`console` output, only visible when the app is launched from a terminal (a plain double-click of the `.exe` shows nothing, since Windows console subsystem is suppressed in release builds via `windows_subsystem = "windows"`).
+
+| Where | What | Visible how |
+|-------|------|-------------|
+| `src-tauri/src/queue.rs` (`broadcast()`) | `println!("queue broadcast: {n} item(s)")`, `println!("queue broadcast: emit ok")` / `eprintln!("queue broadcast: emit FAILED: {e}")` on every queue state change | Rust process stdout/stderr -- run `.\target\debug\noriter-ai.exe` from a PowerShell/terminal window, not by double-clicking, to see it. Added while diagnosing the `queue-update` event not reaching the frontend (see BUGFIXES.md). |
+| `dart_ui/web/bootstrap.js`, `dart_ui/web/worker_bootstrap.js` | `console.error('... wasm boot failed:', e)` if the respective Wasm module fails to compile/instantiate | Webview devtools console (right-click → 검사, if enabled) -- for the main UI thread and the Web Worker respectively |
+| `dart2wasm` runtime (`main.dart.mjs`/`worker.dart.mjs`, generated) | Dart's built-in top-level `print()` compiles down to a `console.log` call in the generated JS glue | Not currently used anywhere in `dart_ui/lib/**` -- no `print()` calls exist yet, so this path is dormant, but any future `print()` in Dart source will surface here automatically |
+
+**Not present in v0.1.3** (were in the old v0.1.2 Dart server, not carried over): the `WS_DEBUG=1` env var that logged every WebSocket event/agent turn to stdout, and any per-request history/log file under `.noriter-ai/`.
+
+### Build (v0.1.3)
+
+Requires Rust 1.88+ (`rustup update stable`), `cargo install tauri-cli --version "^2.0"`, and Dart SDK 3.4+.
+
+```powershell
+cd dart_ui
+bash build.sh              # compiles main.dart.wasm + worker.dart.wasm into build/web
+
+cd ../src-tauri
+cargo tauri dev             # or: cargo build, then run target/debug/noriter-ai.exe
+```
+
+---
+
+## Architecture (v0.1.2, superseded)
 
 ```
 noriter-ai-0.1.2.exe

@@ -5,6 +5,23 @@ Chronological record of bugs found and fixed during development, kept alongside
 
 ---
 
+## (v0.2.0 rewrite) Duplicate system tray icon
+**Symptom:** Two tray icons appeared after launch -- one blue, one transparent/blank.
+**Root cause:** `tauri.conf.json` had a declarative `app.trayIcon` config block *and* `main.rs`'s `setup()` also built a tray icon imperatively via `TrayIconBuilder` (needed for the custom 열기/종료 menu and double-click handler). Tauri instantiated both.
+**Fix:** Removed the declarative `trayIcon` key from `tauri.conf.json`; the icon now comes from `app.default_window_icon()` (the bundle icon) passed into the single `TrayIconBuilder`. (`src-tauri/tauri.conf.json`, `src-tauri/src/main.rs`)
+
+## (v0.2.0 rewrite) Telegram settings save silently stuck on "저장 중..." forever
+**Symptom:** Clicking 저장 in the 텔레그램 panel left the status text on "저장 중..." indefinitely, no error shown.
+**Root cause:** Two stacked issues. (1) The Dart `save_config`/`start_telegram` calls had no `try`/`catch`, so a rejected IPC promise just silently aborted the async function with nothing rendered. (2) Once errors were surfaced, the real cause was the Model dropdown showing its `placeholder` text ("gemma3:4b") in gray -- which is not an actual selected value -- so `ollama_model` was sent as `null`, and `start_telegram` rejected with "telegram_bot_token and ollama_model must both be set".
+**Fix:** Wrapped all panel save handlers in `try`/`catch` that renders the error text directly in the status line instead of failing silently. Separately, replaced the freetext model input with a `<select>` populated from `ollama_models` (installed) + a hardcoded recommended-tag fallback, so there's no way to "half-fill" it with placeholder text. Also relaxed `start_telegram` to only require the bot token -- an unset model no longer blocks the bridge from starting (see next entry). (`dart_ui/lib/main.dart`, `src-tauri/src/main.rs`)
+
+## (v0.2.0 rewrite) Telegram bridge start required both token and model, blocking token-only setup
+**Symptom:** `start_telegram` returned "telegram_bot_token and ollama_model must both be set" even when the user only wanted to save the token first and pick a model later.
+**Root cause:** The command signature required `(Option<String>, Option<String>)` both to be `Some` via a single `let ... else` destructure.
+**Fix:** `telegram::run()` now takes `model: Option<String>`. With no model set, the bridge still starts and listens; on an incoming message it replies with in-chat setup guidance ("🧠 모델 패널에서 모델을 선택하고 저장한 뒤 다시 메시지를 보내주세요") instead of calling Ollama, until a model is saved. (An earlier iteration defaulted silently to `gemma3:4b` instead -- reverted per explicit user preference for the guidance message over a silent substitution.) (`src-tauri/src/telegram.rs`, `src-tauri/src/main.rs`)
+
+---
+
 ## Concurrent requests from web + Telegram could race against shared agent state
 **Symptom:** Not user-reported yet, but latent: `_handleSendMessage` (web) and `_runAgentForTelegram` (Telegram) both read/wrote the same `_agent` and `_cancelled` fields with no serialization. Two requests arriving close together (one from each surface, or two rapid web messages) could run `_agent.run()` concurrently, corrupting `_cancelled`'s meaning (a stop from one request would cancel the other) and interleaving history/broadcast events between turns.
 **Fix:** Added a request queue (`_runQueued()`) that both entry points go through -- requests are chained via a single `Future` tail so only one runs at a time, in arrival order, regardless of which surface they came from. Queue state (waiting/running entries with a preview) is broadcast to the UI as a visible "📋 Request Queue" panel, turning an invisible race into a visible, well-defined FIFO. (`server.dart`, `assets.dart`)

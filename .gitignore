@@ -16,3 +16,11 @@ dist/
 
 # Local secrets
 .noriter-ai/telegram-config.json
+.noriter-ai/chat-history.json
+.noriter-ai/last-engine.json
+
+# Tauri + Rust rewrite (v0.1.3+) build artifacts
+src-tauri/target/
+src-tauri/gen/
+dart_ui/.dart_tool/
+dart_ui/build/

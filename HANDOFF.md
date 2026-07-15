@@ -4,14 +4,159 @@ Written for whichever agent/person picks this up next. See also
 [SPEC.md](SPEC.md) (architecture), [CHANGELOG.md](CHANGELOG.md) (release
 history), [BUGFIXES.md](BUGFIXES.md) (symptom → root cause → fix log).
 
-Branch: `agents/project-brief-overview`. Current version: `v0.1.2` (final,
-confirmed by user), `noriter-ai-0.1.2.exe` at repo root. Every commit on this
-branch has been pushed to `origin` on GitHub -- that push *is* the backup;
-there's no separate backup artifact to look for.
+Branch: `agents/project-brief-overview`. **A full rewrite onto Tauri + Rust
+(`v0.1.3`) is complete for this pass**, replacing the v0.1.2 single-EXE Dart
+server described in the rest of this file. The v0.1.2 section below is kept
+for history/reference but is **not the current codebase shape** -- see the
+v0.1.3 section immediately below for what's actually being worked on now.
 
 ---
 
-## What this session did, in order
+## v0.1.3 session — Tauri + Rust rewrite
+
+Not yet packaged as an installer; only runs via `cargo tauri dev` /
+`target/debug/noriter-ai.exe` from source. See
+[SPEC.md#architecture-v013-tauri--rust](SPEC.md#architecture-v013-tauri--rust)
+for the architecture this section assumes.
+
+### What this session did, in order
+
+1. **Scaffolded `src-tauri/`** — Cargo.toml, `tauri.conf.json`, `main.rs`
+   with system tray + close-to-hide + IPC command registration. Had to
+   `rustup update stable` (1.86 → 1.97) -- some Tauri 2 deps need 1.88+.
+2. **`src/ollama.rs`** — Rust HTTP client for Ollama (`chat`, `is_running`,
+   `list_models`, `running_models`). `chat()` returns `ChatResult { content,
+   tokens_used, elapsed_ms }`, timed on the Rust side so elapsed time is
+   always available even if Ollama's own duration fields are absent.
+3. **`src/telegram.rs`** — `teloxide`-based long-poll loop, spawned once in
+   `setup()` so it survives window hide/show. Ported from the old
+   `dart_platform/lib/src/telegram_bridge.dart`: auto-binds to the first
+   chat that messages the bot and persists the chat ID to config; ignores
+   messages from any other chat once bound; ignores bot-authored messages;
+   truncates outgoing replies to Telegram's ~4096-char limit; echoes the
+   original prompt (`> {text}`) above the generated reply. Explicitly
+   **not** ported: photo/document attachment handling, conversation history
+   (every message is a fresh 1-turn exchange).
+4. **`dart_ui/`** — new Dart Wasm frontend package, zero `dart:io` usage
+   (dart2wasm can't compile it — no filesystem/process/socket access in a
+   browser/Wasm target). Chat UI talks to Rust exclusively through
+   `window.__TAURI__` (`withGlobalTauri: true` in `tauri.conf.json`).
+   `dart_ui/build.sh` compiles it and assembles `build/web`
+   (Tauri's `frontendDist`).
+5. **Web Worker split** (explicit user request, matching the original spec's
+   requirement 1.1) — `lib/worker_main.dart` compiles to a *separate* Wasm
+   module (`worker.dart.wasm`) that runs inside a dedicated Web Worker.
+   `lib/worker/logic.dart` holds pure functions (message
+   timestamp/stats/HTML-escape formatting, Ollama request preprocessing) —
+   no DOM or Tauri access, since neither exists inside a worker.
+   `lib/worker_bridge.dart` is the main-thread request/response wrapper
+   (correlates replies by an incrementing id since `postMessage` is a bare
+   event, not a `Future`). Verified in a real browser: `worker_bootstrap.js`
+   actually loads as a separate network request and the round-trip through
+   it produces correctly formatted messages.
+6. **🧠 모델 / ✈ 텔레그램 / ⚙ 설정 panel split** — originally one combined
+   "설정" panel, split into three per explicit user request ("설정버튼은
+   관리적 기능을 보완 강화하는 방향으로"). Model panel has a live "동작
+   현황" section (Ollama connected / model installed / model **actually
+   loaded into memory**, via `/api/ps`) that polls every 3s while open and
+   refreshes right after any chat reply.
+7. **📋 큐 panel** — `src-tauri/src/queue.rs`: `queue::run_queued()` wraps
+   every Ollama call (web chat's `ollama_chat` command *and* each Telegram
+   message) in one shared FIFO (`tokio::sync::Mutex`), so the two surfaces
+   never call Ollama concurrently. Broadcasts `queue-update` events; the
+   panel renders live entries and a count badge on the button itself even
+   when the panel is closed.
+8. **Message timestamps + generation stats** — every message gets a
+   `YYYY-MM-DD HH:mm:ss` timestamp; assistant replies additionally show
+   `N tokens · X.Xs`. Formatting happens in the Web Worker (item 5), not
+   inline in the UI thread.
+9. **HANDOFF.md/SPEC.md/CHANGELOG.md/BUGFIXES.md updated** for the rewrite
+   (this pass) — none of it had been touched while the Tauri work was
+   happening; caught only when the user asked directly.
+
+### Real bugs found this session (see BUGFIXES.md for full detail)
+- **Duplicate tray icon** — both `tauri.conf.json`'s declarative `trayIcon`
+  config *and* the imperative `TrayIconBuilder` in `main.rs` created one.
+  Fixed by removing the config-based one.
+- **Settings save silently stuck on "저장 중..."** — no `try`/`catch`
+  around the IPC calls masked the real error, which was the Model
+  `<input>`'s gray placeholder text being mistaken for an actual value
+  (sent as `null`). Fixed by adding error surfacing *and* replacing
+  freetext with a `<select>` so this class of bug can't recur.
+- **`start_telegram` required both token and model** — relaxed to only
+  require the token; a missing model degrades to an in-chat guidance
+  message instead of blocking the bridge from starting at all (see item 3
+  in "what this session did" — this was an explicit user correction against
+  an earlier silent-default-to-`gemma3:4b` approach).
+
+### Known gaps (deliberately deferred, not accidental — confirmed with user)
+- No chat history / Telegram conversation-context persistence — explicitly
+  told **not needed** when offered as a next step.
+- No Ollama response streaming (waits for the full reply).
+- No Telegram photo/document attachments (the old Dart bridge had both).
+- Config stored as plaintext JSON (bot token not encrypted).
+- No window chrome control (frameless/opacity/always-on-top from the
+  original spec's requirement 3.1).
+- No cold-start memory budget or background process-priority tuning
+  (requirement 3.2).
+- No installer packaging — only `cargo tauri dev` / a `target/debug` exe
+  has been run, never `cargo tauri build`.
+- Real icons are still placeholder solid-color PNGs generated by a raw PNG
+  encoder in this session (`icons/*.png`, `icons/icon.ico`) — swap for real
+  artwork before any real distribution.
+
+### Workflow notes specific to the Tauri rewrite
+- **Every `cargo build` requires killing the running exe first** — same
+  file-lock issue as the old Dart build, just with `noriter-ai.exe` under
+  `src-tauri/target/debug/`.
+- **This sandbox has no interactive desktop/window station** — `cargo tauri
+  dev` compiles and the process launches but exits almost immediately with
+  no error (just a benign WebView2 teardown log line), because `tao`/`wry`
+  can't paint an actual window here. All real window/tray verification in
+  this session was done by the user running the built exe themselves and
+  reporting back — that loop (build here, user runs + reports, iterate) is
+  the only way to verify UI/tray/window behavior for this project.
+- **`dart_ui/build/web/index.html` gets overwritten by `build.sh`** on every
+  real build — this session repeatedly swapped in a temporary version with
+  a mocked `window.__TAURI__` to unit-test the Dart Wasm UI logic (message
+  formatting, panel toggling, worker round-trip) in the Browser pane
+  *before* spending a full Rust rebuild + asking the user to re-test. Worth
+  continuing this pattern: it caught real bugs (e.g. the innerHTML `.toJS`
+  requirement, the `.mjs`/`.wasm` MIME-type issue with Python's
+  `http.server`) without needing a user round-trip each time.
+- **`dart compile wasm` needs correct `Content-Type` headers to boot in a
+  browser** — `.mjs` must serve as `application/javascript`/`text/javascript`
+  and `.wasm` as `application/wasm`, or `WebAssembly.compileStreaming`/the
+  module `<script>` tag fails silently with no console error captured by
+  the tooling used this session. Tauri's own asset server handles this
+  correctly; only matters when standalone-testing the built `dart_ui/build/web`
+  folder with a throwaway static server.
+- **`src-tauri/target/` reached ~4.4GB during this session** — was never
+  gitignored until the very end of the session (right before the first
+  commit was attempted). Added `src-tauri/target/`, `src-tauri/gen/`,
+  `dart_ui/.dart_tool/`, and `dart_ui/build/` to `.gitignore`. If you see a
+  huge/slow `git add`/`git status`, check `.gitignore` actually took effect
+  (`git status` should not list anything under those paths) before
+  investigating further.
+- **An earlier attempt to commit/push in this session hit a transient
+  failure** (exact error text wasn't preserved — it happened in a part of
+  the session that got summarized away before this note was written). The
+  user reported their internet connection was fine and asked to retry /
+  reset / disconnect+reconnect the `origin` remote. Before doing anything
+  destructive to remote config, `git fetch origin` was run standalone and
+  returned exit code 0 immediately — i.e. **the connection was actually
+  fine by the time this was investigated**, so no remote reset was needed
+  and none was performed (`git remote -v` still points at
+  `https://github.com/hoonee02/noriter-ai.git`, unchanged). If push
+  failures recur, check for the 4.4GB `target/` directory above being
+  accidentally staged first (`git add -A` before the gitignore fix would
+  have tried to push gigabytes) before assuming it's a real network issue.
+
+---
+
+## Previous session (v0.1.2, Dart/shelf architecture — superseded by the Tauri rewrite above)
+
+### What this session did, in order
 
 1. **Context-overflow handling** — `exceed_context_size_error` (HTTP 400 from
    the LLM backend) now trims oldest history and retries instead of crashing

@@ -2,6 +2,23 @@
 
 See [BUGFIXES.md](BUGFIXES.md) for a detailed, symptom → root cause → fix log of every bug found during development.
 
+## [0.1.3] - 2026-07-16
+Full rewrite onto **Tauri + Rust**, replacing the v0.1.2 single-EXE Dart server. Not yet packaged as an installer -- runs via `cargo tauri dev` from source. See [SPEC.md](SPEC.md#architecture-v013-tauri--rust) for the new architecture.
+
+### Added
+- **Rust backend**: Ollama HTTP client, always-on Telegram long-poll bridge (`teloxide`), system tray with close-to-hide, and config persistence -- all replacing the corresponding `dart_platform` modules, which used `dart:io` and can't compile to Wasm.
+- **Dart Wasm frontend**: chat UI compiled with `dart compile wasm`, talking to the Rust backend purely through Tauri IPC (`window.__TAURI__`). No `dart:io` anywhere in `dart_ui/`.
+- **Web Worker split**: message formatting (timestamp, token/time stats, HTML-escaping) and Ollama request preprocessing (default-model fallback, context-size clamping) run in a separately-compiled Wasm module (`worker.dart.wasm`) inside a Web Worker, off the main/UI thread. Communication is `postMessage` + JSON only.
+- **🧠 모델 panel**: dropdown of installed + recommended Ollama models, a connection-check button that verifies Ollama is actually reachable and refreshes the installed list, and a live "동작 현황" section (server connected / model installed / model currently loaded into memory) that polls every 3s while the panel is open and refreshes immediately after any chat reply.
+- **✈ 텔레그램 panel**: bot token + enable toggle, calling a `start_telegram` command that's safe to call repeatedly (guarded so the long-poll loop is never double-spawned). Starting only requires the token -- no model chosen yet is fine; the bridge replies with setup guidance in-chat instead of failing.
+- **Telegram bridge feature parity (partial) with the old Dart bridge**: auto-binds to the first chat that messages the bot and persists the chat ID; ignores messages from any other chat once bound; ignores bot-authored messages; truncates outgoing replies to Telegram's ~4096-char limit; echoes the original prompt (`> {text}`) above the generated reply.
+- **📋 큐 panel**: web chat and Telegram requests now funnel through one Rust-side FIFO (`queue::run_queued`) so they never call Ollama concurrently; the queue's live contents (waiting/running, source, preview) are broadcast as `queue-update` events and rendered with a count badge on the button itself.
+- **Message timestamps + generation stats**: every message (web chat and mirrored Telegram traffic) gets a `YYYY-MM-DD HH:mm:ss` generation timestamp; assistant replies additionally show `N tokens · X.Xs` (Ollama's `eval_count` + wall-clock time measured in Rust).
+- **⚙ 설정 panel**: context size, saved independently of the model/Telegram panels.
+
+### Known gaps (deliberately deferred, see SPEC.md)
+No chat history or Telegram conversation-context persistence, no Ollama response streaming, no Telegram photo/document attachments, config stored as plaintext JSON (not encrypted), no window chrome control (frameless/opacity/always-on-top), no installer packaging yet.
+
 ## [0.1.2] - 2026-07-12
 ### Added
 - **Context size "Apply" button**: llama.cpp/Ollama allocate the KV cache at model-load time, so context size can't change on a running model without a reload -- the slider previously only took effect on the *next* Run. Now an Apply button next to it reloads the currently running model with the new size on click. Disabled whenever a request is running or queued (reloading mid-generation would cut off or error out the in-progress reply) or when no model is running yet.
