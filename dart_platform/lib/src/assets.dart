@@ -84,8 +84,11 @@ const String kChatHtml = r'''<!DOCTYPE html>
                     <label for="context-size-slider" style="font-weight:600;">Context Size</label>
                     <span id="context-size-value" style="color:var(--vscode-descriptionForeground);">4096 tokens</span>
                 </div>
-                <input type="range" id="context-size-slider" min="512" max="32768" step="512" value="4096" style="width:100%;">
-                <div style="color:var(--vscode-descriptionForeground); font-size:10px; margin-top:2px;">Applied the next time you start the engine. Larger values use more RAM.</div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <input type="range" id="context-size-slider" min="512" max="32768" step="512" value="4096" style="flex:1;">
+                    <button id="context-size-apply-btn" class="action-btn" style="padding:3px 10px; font-size:11px;" disabled>Apply</button>
+                </div>
+                <div id="context-size-hint" style="color:var(--vscode-descriptionForeground); font-size:10px; margin-top:2px;">Used when you next Run a model. Click Apply to reload the running model with a new size. Larger values use more RAM.</div>
             </div>
             <div id="local-models-section" style="margin-bottom:10px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
@@ -582,6 +585,8 @@ const String kMainJs = r'''(function () {
     const recommendedModelsList = document.getElementById('recommended-models-list');
     const contextSizeSlider = document.getElementById('context-size-slider');
     const contextSizeValue = document.getElementById('context-size-value');
+    const contextSizeApplyBtn = document.getElementById('context-size-apply-btn');
+    const contextSizeHint = document.getElementById('context-size-hint');
     const telegramBtn = document.getElementById('telegram-btn');
     const telegramPanel = document.getElementById('telegram-panel');
     const telegramPanelClose = document.getElementById('telegram-panel-close');
@@ -606,6 +611,7 @@ const String kMainJs = r'''(function () {
     let engineReady = false;  // tracks whether embedded engine is running
     let engineInstalled = false;
     let engineMode = 'embedded';
+    let queueBusy = false;  // true while any request is waiting/running
 
     if (contextSizeSlider && contextSizeValue) {
         contextSizeSlider.addEventListener('input', function () {
@@ -615,6 +621,33 @@ const String kMainJs = r'''(function () {
 
     function getSelectedContextSize() {
         return contextSizeSlider ? parseInt(contextSizeSlider.value, 10) : 4096;
+    }
+
+    // The Apply button reloads the *running* model with a new context size --
+    // llama.cpp/Ollama allocate the KV cache at load time, so this can't be
+    // changed live without a reload. Only allowed when a model is actually
+    // running and no request is in flight/queued (a mid-generation reload
+    // would cut off or error out the in-progress reply).
+    function updateContextApplyButtonState() {
+        if (!contextSizeApplyBtn) return;
+        var canApply = engineReady && !queueBusy;
+        contextSizeApplyBtn.disabled = !canApply;
+        if (contextSizeHint) {
+            contextSizeHint.textContent = queueBusy
+                ? 'Apply is disabled while a request is running or queued.'
+                : (engineReady
+                    ? 'Click Apply to reload the running model with this context size.'
+                    : 'Used when you next Run a model. Larger values use more RAM.');
+        }
+    }
+
+    if (contextSizeApplyBtn) {
+        contextSizeApplyBtn.addEventListener('click', function () {
+            if (contextSizeApplyBtn.disabled) return;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'applyContextSize', contextSize: getSelectedContextSize() }));
+            }
+        });
     }
 
     // Banner shown when engine is not ready
@@ -629,6 +662,7 @@ const String kMainJs = r'''(function () {
 
     function setEngineReady(ready) {
         engineReady = ready;
+        updateContextApplyButtonState();
         if (engineMode === 'external') {
             engineBanner.style.display = 'none';
             chatInput.disabled = false;
@@ -933,9 +967,25 @@ const String kMainJs = r'''(function () {
 
     function formatMessageTime(timestamp) {
         var date = timestamp ? new Date(timestamp) : new Date();
+        var now = new Date();
         var hh = String(date.getHours()).padStart(2, '0');
         var mm = String(date.getMinutes()).padStart(2, '0');
-        return hh + ':' + mm;
+        var timePart = hh + ':' + mm;
+
+        var isToday = date.getFullYear() === now.getFullYear() &&
+            date.getMonth() === now.getMonth() &&
+            date.getDate() === now.getDate();
+        if (isToday) {
+            return timePart;
+        }
+        var yyyy = date.getFullYear();
+        var monthNum = String(date.getMonth() + 1).padStart(2, '0');
+        var dd = String(date.getDate()).padStart(2, '0');
+        // Only include the year if it differs from the current year, to keep
+        // same-year-but-older-day timestamps ("07/12 14:23") compact while
+        // still disambiguating across a year boundary ("2025/12/31 23:59").
+        var datePart = (yyyy === now.getFullYear() ? '' : yyyy + '/') + monthNum + '/' + dd;
+        return datePart + ' ' + timePart;
     }
 
     function formatMessageMeta(tokensUsed, elapsedMs) {
@@ -1134,6 +1184,8 @@ const String kMainJs = r'''(function () {
 
     function updateQueuePanel(items) {
         if (!queuePanel || !queueList) return;
+        queueBusy = !!(items && items.length > 0);
+        updateContextApplyButtonState();
         if (!items || items.length === 0) {
             queuePanel.style.display = 'none';
             queueList.innerHTML = '';

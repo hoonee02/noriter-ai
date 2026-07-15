@@ -328,6 +328,27 @@ class NoriterServer {
         unawaited(_runStopEngine());
         break;
 
+      case 'applyContextSize':
+        final requestedContextSize = msg['contextSize'];
+        final contextSize = requestedContextSize is int ? requestedContextSize.clamp(512, 32768) : null;
+        if (contextSize == null) break;
+        if (_queue.isNotEmpty) {
+          _broadcast({
+            'type': 'error',
+            'value': 'Cannot change context size while a request is running or queued. Wait for it to finish and try again.',
+          });
+          break;
+        }
+        if (_activeModelTag == null) {
+          _broadcast({'type': 'error', 'value': 'No model is running. Start one first, then Apply a context size.'});
+          break;
+        }
+        // Reloads the currently active model with the new context size --
+        // this can't be changed on a running model without a reload since
+        // llama.cpp/Ollama allocate the KV cache at load time.
+        unawaited(_runStartEngine(_activeModelTag!, contextSize));
+        break;
+
       case 'downloadModel':
         final tag = (msg['tag'] as String?) ?? (msg['url'] as String?);
         if (tag != null && tag.isNotEmpty) {

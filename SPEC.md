@@ -137,6 +137,7 @@ of a filesystem path -- a much lower-friction "pick a model, click Run" flow.
 | `clearHistory` | — | Clear chat history |
 | `downloadEngine` | — | If Ollama isn't installed, opens its download page in the browser; if installed, starts `ollama serve` |
 | `startEngine` | `{ modelPath: <ollama tag>, contextSize?: int }` | Loads a model into Ollama (contextSize clamped 512–32768, default 4096; `modelPath` holds the Ollama tag despite the legacy field name) |
+| `applyContextSize` | `{ contextSize: int }` | Reloads the currently active model with a new context size; rejected (via an `error` broadcast) if a request is running/queued or no model is loaded |
 | `downloadModel` | `{ tag: <ollama tag> }` | Pulls a model via Ollama |
 | `getEngineStatus` | — | Request current engine state |
 | `listLocalModels` | — | List models already pulled into Ollama |
