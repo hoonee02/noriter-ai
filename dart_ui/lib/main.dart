@@ -24,6 +24,9 @@ void main() {
           <button id="queueBtn" type="button">📋 큐</button>
           <button id="modelBtn" type="button">🧠 모델</button>
           <button id="telegramBtn" type="button">✈ 텔레그램</button>
+          <button id="promptBtn" type="button">📝 프롬프트</button>
+          <button id="memoryBtn" type="button">🧑 메모리</button>
+          <button id="wikiBtn" type="button">📚 위키</button>
           <button id="settingsBtn" type="button">⚙ 설정</button>
         </div>
       </div>
@@ -70,6 +73,75 @@ void main() {
         </div>
       </div>
 
+      <div id="promptPanel" class="panel hidden">
+        <p class="panelDesc">
+          사진/파일을 캡션 없이 보내면(텔레그램 클라이언트에 따라 캡션을 못 붙이는 경우가 있습니다)
+          아래 문구가 프롬프트로 대신 쓰입니다. 비워두면 기본 문구("첨부된 내용을 확인하고
+          설명해주세요.")가 사용됩니다. 대화 기억은 없으므로 이 프롬프트는 매번 새로 적용됩니다.
+        </p>
+        <label>첨부파일 기본 프롬프트
+          <textarea id="cfgAttachmentPrompt" rows="4" placeholder="첨부된 내용을 확인하고 설명해주세요."></textarea>
+        </label>
+        <div class="panelActions">
+          <button id="promptSave" type="button">저장</button>
+          <span id="promptStatus"></span>
+        </div>
+      </div>
+
+      <div id="memoryPanel" class="panel hidden">
+        <p class="panelDesc">
+          여기 있는 내용은 웹/텔레그램 모든 대화에 항상 참고 정보로 포함됩니다 (재시작해도
+          유지됨). 대화 중 5턴마다 자동으로 기억할 만한 내용이 있는지도 확인해 추가합니다.
+          📌 고정하면 항상 우선 포함됩니다.
+        </p>
+        <div id="memoryList" class="entryList"></div>
+        <label>새 항목 내용
+          <textarea id="memoryContent" rows="2" placeholder="예: 사용자는 GTX 1660 6GB VRAM 환경을 사용한다"></textarea>
+        </label>
+        <div class="panelRow">
+          <label>분류
+            <select id="memoryCategory">
+              <option value="fact">fact</option>
+              <option value="hardware">hardware</option>
+              <option value="preference">preference</option>
+              <option value="instruction">instruction</option>
+              <option value="other">other</option>
+            </select>
+          </label>
+          <label class="checkbox"><input id="memoryPinned" type="checkbox" /> 📌 고정</label>
+        </div>
+        <div class="panelActions">
+          <button id="memorySave" type="button">추가</button>
+          <button id="memoryCancelEdit" type="button" class="hidden">취소</button>
+          <span id="memoryStatus"></span>
+        </div>
+      </div>
+
+      <div id="wikiPanel" class="panel hidden">
+        <p class="panelDesc">
+          대화 중 나온 내용을 문서로 정리해서 보관합니다 (자동 생성 안 됨 -- 직접 저장해야
+          쌓입니다). 나중에 찾아볼 수 있는 "찾아보는 자료"입니다.
+        </p>
+        <div id="wikiList" class="entryList"></div>
+        <label>제목
+          <input id="wikiTitle" type="text" placeholder="예: 예제모음.xlsx 데이터 구조" />
+        </label>
+        <label>요약
+          <input id="wikiSummary" type="text" placeholder="한 줄 요약" />
+        </label>
+        <label>본문
+          <textarea id="wikiBody" rows="4" placeholder="마크다운으로 자유롭게"></textarea>
+        </label>
+        <label>태그 (쉼표로 구분)
+          <input id="wikiTags" type="text" placeholder="excel, telegram" />
+        </label>
+        <div class="panelActions">
+          <button id="wikiSave" type="button">저장</button>
+          <button id="wikiCancelEdit" type="button" class="hidden">취소</button>
+          <span id="wikiStatus"></span>
+        </div>
+      </div>
+
       <div id="settingsPanel" class="panel hidden">
         <label>컨텍스트 크기
           <div class="sliderRow">
@@ -95,6 +167,7 @@ void main() {
   _wire();
   _loadModelPanel();
   _loadTelegramPanel();
+  _loadPromptPanel();
   _loadSettingsPanel();
 }
 
@@ -148,6 +221,12 @@ Future<void> _updateMessage(web.HTMLElement line, String text, {int? tokensUsed,
 
 web.HTMLElement _byId(String id) => web.document.getElementById(id) as web.HTMLElement;
 
+void _forEachElement(web.NodeList nodes, void Function(web.HTMLElement) fn) {
+  for (var i = 0; i < nodes.length; i++) {
+    fn(nodes.item(i) as web.HTMLElement);
+  }
+}
+
 void _togglePanel(String panelId, List<String> others) {
   final panel = _byId(panelId);
   final wasHidden = panel.classList.contains('hidden');
@@ -190,7 +269,15 @@ void _wire() {
     }
   });
 
-  const panels = ['queuePanel', 'modelPanel', 'telegramPanel', 'settingsPanel'];
+  const panels = [
+    'queuePanel',
+    'modelPanel',
+    'telegramPanel',
+    'promptPanel',
+    'memoryPanel',
+    'wikiPanel',
+    'settingsPanel',
+  ];
 
   void wireToggle(
     String btnId,
@@ -219,6 +306,15 @@ void _wire() {
     onClose: _stopModelHealthPolling,
   );
   wireToggle('telegramBtn', 'telegramPanel', onOpen: _stopModelHealthPolling);
+  wireToggle('promptBtn', 'promptPanel', onOpen: _stopModelHealthPolling);
+  wireToggle('memoryBtn', 'memoryPanel', onOpen: () {
+    _stopModelHealthPolling();
+    unawaited(_loadMemoryPanel());
+  });
+  wireToggle('wikiBtn', 'wikiPanel', onOpen: () {
+    _stopModelHealthPolling();
+    unawaited(_loadWikiPanel());
+  });
   wireToggle('settingsBtn', 'settingsPanel', onOpen: _stopModelHealthPolling);
   wireToggle('queueBtn', 'queuePanel', onOpen: _stopModelHealthPolling);
 
@@ -243,6 +339,10 @@ void _wire() {
   void onTelegramSave(web.Event e) => _saveTelegram();
   telegramSaveBtn.addEventListener('click', onTelegramSave.toJS);
 
+  final promptSaveBtn = web.document.getElementById('promptSave') as web.HTMLButtonElement;
+  void onPromptSave(web.Event e) => _savePrompt();
+  promptSaveBtn.addEventListener('click', onPromptSave.toJS);
+
   final settingsSaveBtn = web.document.getElementById('settingsSave') as web.HTMLButtonElement;
   void onSettingsSave(web.Event e) => _saveGeneralSettings();
   settingsSaveBtn.addEventListener('click', onSettingsSave.toJS);
@@ -253,6 +353,22 @@ void _wire() {
   }
 
   contextSlider.addEventListener('input', onContextSliderInput.toJS);
+
+  final memorySaveBtn = web.document.getElementById('memorySave') as web.HTMLButtonElement;
+  void onMemorySave(web.Event e) => unawaited(_saveMemoryEntry());
+  memorySaveBtn.addEventListener('click', onMemorySave.toJS);
+
+  final memoryCancelBtn = web.document.getElementById('memoryCancelEdit') as web.HTMLButtonElement;
+  void onMemoryCancel(web.Event e) => _resetMemoryForm();
+  memoryCancelBtn.addEventListener('click', onMemoryCancel.toJS);
+
+  final wikiSaveBtn = web.document.getElementById('wikiSave') as web.HTMLButtonElement;
+  void onWikiSave(web.Event e) => unawaited(_saveWikiEntry());
+  wikiSaveBtn.addEventListener('click', onWikiSave.toJS);
+
+  final wikiCancelBtn = web.document.getElementById('wikiCancelEdit') as web.HTMLButtonElement;
+  void onWikiCancel(web.Event e) => _resetWikiForm();
+  wikiCancelBtn.addEventListener('click', onWikiCancel.toJS);
 }
 
 void _renderQueue(List items) {
@@ -406,6 +522,7 @@ Future<void> _saveModel() async {
         'telegram_chat_id': current['telegram_chat_id'],
         'telegram_enabled': current['telegram_enabled'] ?? false,
         'context_size': (current['context_size'] as num?)?.toInt() ?? 4096,
+        'attachment_prompt': current['attachment_prompt'],
       },
     });
     status.textContent = '저장됨';
@@ -439,6 +556,7 @@ Future<void> _saveTelegram() async {
         'telegram_chat_id': current['telegram_chat_id'],
         'telegram_enabled': enabled,
         'context_size': (current['context_size'] as num?)?.toInt() ?? 4096,
+        'attachment_prompt': current['attachment_prompt'],
       },
     });
 
@@ -450,6 +568,36 @@ Future<void> _saveTelegram() async {
     } else {
       status.textContent = '저장됨';
     }
+  } catch (e) {
+    status.textContent = '오류: $e';
+  }
+}
+
+Future<void> _loadPromptPanel() async {
+  final cfg = await tauri.invoke('load_config') as Map?;
+  (web.document.getElementById('cfgAttachmentPrompt') as web.HTMLTextAreaElement).value =
+      (cfg?['attachment_prompt'] as String?) ?? '';
+}
+
+Future<void> _savePrompt() async {
+  final status = web.document.getElementById('promptStatus')!;
+  status.textContent = '저장 중...';
+  try {
+    final attachmentPrompt =
+        (web.document.getElementById('cfgAttachmentPrompt') as web.HTMLTextAreaElement).value.trim();
+
+    final current = await tauri.invoke('load_config') as Map? ?? {};
+    await tauri.invoke('save_config', {
+      'cfg': {
+        'ollama_model': current['ollama_model'],
+        'telegram_bot_token': current['telegram_bot_token'],
+        'telegram_chat_id': current['telegram_chat_id'],
+        'telegram_enabled': current['telegram_enabled'] ?? false,
+        'context_size': (current['context_size'] as num?)?.toInt() ?? 4096,
+        'attachment_prompt': attachmentPrompt.isEmpty ? null : attachmentPrompt,
+      },
+    });
+    status.textContent = '저장됨';
   } catch (e) {
     status.textContent = '오류: $e';
   }
@@ -477,12 +625,247 @@ Future<void> _saveGeneralSettings() async {
         'telegram_chat_id': current['telegram_chat_id'],
         'telegram_enabled': current['telegram_enabled'] ?? false,
         'context_size': contextSize,
+        'attachment_prompt': current['attachment_prompt'],
       },
     });
     status.textContent = '저장됨';
   } catch (e) {
     status.textContent = '오류: $e';
   }
+}
+
+// ---------------------------------------------------------------------
+// 🧑 메모리 panel -- personal persistent memory (survives restarts, always
+// injected into every request; see src-tauri/src/personal_memory.rs).
+// ---------------------------------------------------------------------
+
+String? _memoryEditingId;
+
+Future<void> _loadMemoryPanel() async {
+  final entries = await tauri.invoke('personal_memory_list') as List? ?? [];
+  _renderMemoryList(entries);
+}
+
+void _renderMemoryList(List entries) {
+  final list = web.document.getElementById('memoryList')!;
+  if (entries.isEmpty) {
+    list.textContent = '저장된 항목 없음';
+    return;
+  }
+  final sorted = entries.cast<Map>().toList()
+    ..sort((a, b) {
+      final pinnedCmp = (b['pinned'] == true ? 1 : 0) - (a['pinned'] == true ? 1 : 0);
+      if (pinnedCmp != 0) return pinnedCmp;
+      return (b['updated_at'] as String? ?? '').compareTo(a['updated_at'] as String? ?? '');
+    });
+
+  list.innerHTML = sorted.map((e) {
+    final id = e['id'] as String;
+    final pin = e['pinned'] == true ? '📌 ' : '';
+    final category = _escapeHtml(e['category'] as String? ?? '');
+    final content = _escapeHtml(e['content'] as String? ?? '');
+    return '''
+      <div class="entryItem" data-id="$id">
+        <div class="entryText">$pin[$category] $content</div>
+        <div class="entryActions">
+          <button type="button" class="entryEdit" data-id="$id">편집</button>
+          <button type="button" class="entryDelete" data-id="$id">삭제</button>
+        </div>
+      </div>
+    ''';
+  }).join().toJS;
+
+  _forEachElement(list.querySelectorAll('.entryEdit'), (btn) {
+    final id = btn.getAttribute('data-id')!;
+    final entry = sorted.firstWhere((e) => e['id'] == id);
+    void onEdit(web.Event e) => _startEditMemory(entry);
+    btn.addEventListener('click', onEdit.toJS);
+  });
+  _forEachElement(list.querySelectorAll('.entryDelete'), (btn) {
+    final id = btn.getAttribute('data-id')!;
+    void onDelete(web.Event e) => unawaited(_deleteMemoryEntry(id));
+    btn.addEventListener('click', onDelete.toJS);
+  });
+}
+
+void _startEditMemory(Map entry) {
+  _memoryEditingId = entry['id'] as String;
+  (web.document.getElementById('memoryContent') as web.HTMLTextAreaElement).value =
+      entry['content'] as String? ?? '';
+  (web.document.getElementById('memoryCategory') as web.HTMLSelectElement).value =
+      entry['category'] as String? ?? 'fact';
+  (web.document.getElementById('memoryPinned') as web.HTMLInputElement).checked = entry['pinned'] == true;
+  (web.document.getElementById('memorySave') as web.HTMLButtonElement).textContent = '수정 저장';
+  web.document.getElementById('memoryCancelEdit')!.classList.remove('hidden');
+}
+
+void _resetMemoryForm() {
+  _memoryEditingId = null;
+  (web.document.getElementById('memoryContent') as web.HTMLTextAreaElement).value = '';
+  (web.document.getElementById('memoryCategory') as web.HTMLSelectElement).value = 'fact';
+  (web.document.getElementById('memoryPinned') as web.HTMLInputElement).checked = false;
+  (web.document.getElementById('memorySave') as web.HTMLButtonElement).textContent = '추가';
+  web.document.getElementById('memoryCancelEdit')!.classList.add('hidden');
+}
+
+Future<void> _saveMemoryEntry() async {
+  final status = web.document.getElementById('memoryStatus')!;
+  status.textContent = '저장 중...';
+  try {
+    final content = (web.document.getElementById('memoryContent') as web.HTMLTextAreaElement).value.trim();
+    final category = (web.document.getElementById('memoryCategory') as web.HTMLSelectElement).value;
+    final pinned = (web.document.getElementById('memoryPinned') as web.HTMLInputElement).checked;
+    if (content.isEmpty) {
+      status.textContent = '내용을 입력하세요';
+      return;
+    }
+
+    if (_memoryEditingId != null) {
+      await tauri.invoke('personal_memory_update', {
+        'id': _memoryEditingId,
+        'content': content,
+        'category': category,
+        'pinned': pinned,
+      });
+    } else {
+      await tauri.invoke('personal_memory_add', {
+        'content': content,
+        'category': category,
+        'pinned': pinned,
+      });
+    }
+    _resetMemoryForm();
+    status.textContent = '저장됨';
+    await _loadMemoryPanel();
+  } catch (e) {
+    status.textContent = '오류: $e';
+  }
+}
+
+Future<void> _deleteMemoryEntry(String id) async {
+  await tauri.invoke('personal_memory_delete', {'id': id});
+  await _loadMemoryPanel();
+}
+
+// ---------------------------------------------------------------------
+// 📚 위키 panel -- curated knowledge-base documents (survives restarts,
+// never auto-injected; see src-tauri/src/wiki.rs). Only grows when the
+// user explicitly saves something here.
+// ---------------------------------------------------------------------
+
+String? _wikiEditingId;
+
+Future<void> _loadWikiPanel() async {
+  final entries = await tauri.invoke('wiki_list') as List? ?? [];
+  _renderWikiList(entries);
+}
+
+void _renderWikiList(List entries) {
+  final list = web.document.getElementById('wikiList')!;
+  if (entries.isEmpty) {
+    list.textContent = '저장된 문서 없음';
+    return;
+  }
+  final sorted = entries.cast<Map>().toList()
+    ..sort((a, b) => (b['updated_at'] as String? ?? '').compareTo(a['updated_at'] as String? ?? ''));
+
+  list.innerHTML = sorted.map((e) {
+    final id = e['id'] as String;
+    final title = _escapeHtml(e['title'] as String? ?? '');
+    final summary = _escapeHtml(e['summary'] as String? ?? '');
+    final tags = (e['tags'] as List?)?.cast<String>().join(', ') ?? '';
+    return '''
+      <div class="entryItem" data-id="$id">
+        <div class="entryText"><strong>$title</strong> -- $summary${tags.isEmpty ? '' : ' [$tags]'}</div>
+        <div class="entryActions">
+          <button type="button" class="entryEdit" data-id="$id">편집</button>
+          <button type="button" class="entryDelete" data-id="$id">삭제</button>
+        </div>
+      </div>
+    ''';
+  }).join().toJS;
+
+  _forEachElement(list.querySelectorAll('.entryEdit'), (btn) {
+    final id = btn.getAttribute('data-id')!;
+    final entry = sorted.firstWhere((e) => e['id'] == id);
+    void onEdit(web.Event e) => _startEditWiki(entry);
+    btn.addEventListener('click', onEdit.toJS);
+  });
+  _forEachElement(list.querySelectorAll('.entryDelete'), (btn) {
+    final id = btn.getAttribute('data-id')!;
+    void onDelete(web.Event e) => unawaited(_deleteWikiEntry(id));
+    btn.addEventListener('click', onDelete.toJS);
+  });
+}
+
+void _startEditWiki(Map entry) {
+  _wikiEditingId = entry['id'] as String;
+  (web.document.getElementById('wikiTitle') as web.HTMLInputElement).value = entry['title'] as String? ?? '';
+  (web.document.getElementById('wikiSummary') as web.HTMLInputElement).value =
+      entry['summary'] as String? ?? '';
+  (web.document.getElementById('wikiBody') as web.HTMLTextAreaElement).value = entry['body'] as String? ?? '';
+  (web.document.getElementById('wikiTags') as web.HTMLInputElement).value =
+      (entry['tags'] as List?)?.cast<String>().join(', ') ?? '';
+  (web.document.getElementById('wikiSave') as web.HTMLButtonElement).textContent = '수정 저장';
+  web.document.getElementById('wikiCancelEdit')!.classList.remove('hidden');
+}
+
+void _resetWikiForm() {
+  _wikiEditingId = null;
+  (web.document.getElementById('wikiTitle') as web.HTMLInputElement).value = '';
+  (web.document.getElementById('wikiSummary') as web.HTMLInputElement).value = '';
+  (web.document.getElementById('wikiBody') as web.HTMLTextAreaElement).value = '';
+  (web.document.getElementById('wikiTags') as web.HTMLInputElement).value = '';
+  (web.document.getElementById('wikiSave') as web.HTMLButtonElement).textContent = '저장';
+  web.document.getElementById('wikiCancelEdit')!.classList.add('hidden');
+}
+
+Future<void> _saveWikiEntry() async {
+  final status = web.document.getElementById('wikiStatus')!;
+  status.textContent = '저장 중...';
+  try {
+    final title = (web.document.getElementById('wikiTitle') as web.HTMLInputElement).value.trim();
+    final summary = (web.document.getElementById('wikiSummary') as web.HTMLInputElement).value.trim();
+    final body = (web.document.getElementById('wikiBody') as web.HTMLTextAreaElement).value.trim();
+    final tags = (web.document.getElementById('wikiTags') as web.HTMLInputElement)
+        .value
+        .split(',')
+        .map((t) => t.trim())
+        .where((t) => t.isNotEmpty)
+        .toList();
+    if (title.isEmpty) {
+      status.textContent = '제목을 입력하세요';
+      return;
+    }
+
+    if (_wikiEditingId != null) {
+      await tauri.invoke('wiki_update', {
+        'id': _wikiEditingId,
+        'title': title,
+        'summary': summary,
+        'body': body,
+        'tags': tags,
+      });
+    } else {
+      await tauri.invoke('wiki_save', {
+        'title': title,
+        'summary': summary,
+        'body': body,
+        'tags': tags,
+        'relatedIds': <String>[],
+      });
+    }
+    _resetWikiForm();
+    status.textContent = '저장됨';
+    await _loadWikiPanel();
+  } catch (e) {
+    status.textContent = '오류: $e';
+  }
+}
+
+Future<void> _deleteWikiEntry(String id) async {
+  await tauri.invoke('wiki_delete', {'id': id});
+  await _loadWikiPanel();
 }
 
 Future<void> _sendToOllama(String text) async {

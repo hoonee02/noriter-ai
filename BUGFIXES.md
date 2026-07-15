@@ -5,20 +5,25 @@ Chronological record of bugs found and fixed during development, kept alongside
 
 ---
 
-## (v0.2.0 rewrite) Duplicate system tray icon
+## (v0.1.3 rewrite) Duplicate system tray icon
 **Symptom:** Two tray icons appeared after launch -- one blue, one transparent/blank.
 **Root cause:** `tauri.conf.json` had a declarative `app.trayIcon` config block *and* `main.rs`'s `setup()` also built a tray icon imperatively via `TrayIconBuilder` (needed for the custom 열기/종료 menu and double-click handler). Tauri instantiated both.
 **Fix:** Removed the declarative `trayIcon` key from `tauri.conf.json`; the icon now comes from `app.default_window_icon()` (the bundle icon) passed into the single `TrayIconBuilder`. (`src-tauri/tauri.conf.json`, `src-tauri/src/main.rs`)
 
-## (v0.2.0 rewrite) Telegram settings save silently stuck on "저장 중..." forever
+## (v0.1.3 rewrite) Telegram settings save silently stuck on "저장 중..." forever
 **Symptom:** Clicking 저장 in the 텔레그램 panel left the status text on "저장 중..." indefinitely, no error shown.
 **Root cause:** Two stacked issues. (1) The Dart `save_config`/`start_telegram` calls had no `try`/`catch`, so a rejected IPC promise just silently aborted the async function with nothing rendered. (2) Once errors were surfaced, the real cause was the Model dropdown showing its `placeholder` text ("gemma3:4b") in gray -- which is not an actual selected value -- so `ollama_model` was sent as `null`, and `start_telegram` rejected with "telegram_bot_token and ollama_model must both be set".
 **Fix:** Wrapped all panel save handlers in `try`/`catch` that renders the error text directly in the status line instead of failing silently. Separately, replaced the freetext model input with a `<select>` populated from `ollama_models` (installed) + a hardcoded recommended-tag fallback, so there's no way to "half-fill" it with placeholder text. Also relaxed `start_telegram` to only require the bot token -- an unset model no longer blocks the bridge from starting (see next entry). (`dart_ui/lib/main.dart`, `src-tauri/src/main.rs`)
 
-## (v0.2.0 rewrite) Telegram bridge start required both token and model, blocking token-only setup
+## (v0.1.3 rewrite) Telegram bridge start required both token and model, blocking token-only setup
 **Symptom:** `start_telegram` returned "telegram_bot_token and ollama_model must both be set" even when the user only wanted to save the token first and pick a model later.
 **Root cause:** The command signature required `(Option<String>, Option<String>)` both to be `Some` via a single `let ... else` destructure.
 **Fix:** `telegram::run()` now takes `model: Option<String>`. With no model set, the bridge still starts and listens; on an incoming message it replies with in-chat setup guidance ("🧠 모델 패널에서 모델을 선택하고 저장한 뒤 다시 메시지를 보내주세요") instead of calling Ollama, until a model is saved. (An earlier iteration defaulted silently to `gemma3:4b` instead -- reverted per explicit user preference for the guidance message over a silent substitution.) (`src-tauri/src/telegram.rs`, `src-tauri/src/main.rs`)
+
+## (v0.1.3) Telegram reply to a document attachment showed the file dump instead of the generated answer
+**Symptom:** Sending an .xlsx to the bot got a reply that was just the echoed `[Attached file: ...]` text-table dump -- the actual LLM-generated answer never appeared. Confirmed by the user with a screenshot; the same request through the web chat UI produced a real, correct answer, so the model/Ollama side was fine.
+**Root cause:** The outgoing Telegram message was built as `"> {text}\n\n{reply}"` where `text` is the *full prompt sent to Ollama* -- for a document attachment this includes the entire extracted file content (up to `MAX_ATTACHMENT_CHARS` = 8000 chars). The combined string was then truncated to `MAX_REPLY_CHARS` (3900, Telegram's ~4096 limit with margin) by taking the first N chars -- but the echoed prompt alone already exceeded 3900 chars, so the truncation cut off before ever reaching `{reply}`. The actual generated answer was silently dropped every time an attachment's extracted text was long enough (basically always, for any real spreadsheet).
+**Fix:** Stopped echoing the full prompt. The echoed preview above the reply is now a short caption-only string (`raw_text`, capped at `MAX_ECHO_CHARS` = 200) or `[첨부파일]`/`[첨부파일] {caption}` when there's an attachment -- never the extracted file content. The reply itself is now truncated on its own budget (`MAX_REPLY_CHARS` minus the echo's length), so a long echo can no longer push the real answer out of the message entirely. (`src-tauri/src/telegram.rs`)
 
 ---
 

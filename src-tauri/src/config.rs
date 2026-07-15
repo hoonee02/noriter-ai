@@ -2,13 +2,25 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+// `#[serde(default)]` on the struct matters: without it, any field missing
+// from an on-disk config.json (e.g. one saved before a new field was added)
+// makes the whole deserialize fail, and `load()` below silently falls back
+// to `AppConfig::default()` -- discarding the user's saved token/model/etc,
+// not just the new field. This was a latent bug before `attachment_prompt`
+// was added; guarding it here so it doesn't bite again on the next field.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct AppConfig {
     pub telegram_bot_token: Option<String>,
     pub telegram_chat_id: Option<String>,
     pub telegram_enabled: bool,
     pub ollama_model: Option<String>,
     pub context_size: u32,
+    /// Applied as the prompt when a Telegram photo/document arrives with no
+    /// caption -- Telegram doesn't always let the user attach a caption
+    /// (e.g. some clients' "send as file" flow), so without this the
+    /// message would fall back to a generic "첨부된 파일을 확인해주세요."
+    pub attachment_prompt: Option<String>,
 }
 
 fn config_path() -> PathBuf {

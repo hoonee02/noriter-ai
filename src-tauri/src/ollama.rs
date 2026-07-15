@@ -8,6 +8,18 @@ const BASE_URL: &str = "http://127.0.0.1:11434";
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+    /// Base64-encoded image bytes (no data-URL prefix) -- Ollama's own
+    /// multimodal format, distinct from OpenAI's content-parts array.
+    /// Requires a vision-capable model; Ollama returns an error otherwise,
+    /// which surfaces to the user as-is (no capability pre-check yet).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub images: Option<Vec<String>>,
+}
+
+impl ChatMessage {
+    pub fn text(role: impl Into<String>, content: impl Into<String>) -> Self {
+        Self { role: role.into(), content: content.into(), images: None }
+    }
 }
 
 #[derive(Debug, Serialize, Clone)]

@@ -61,15 +61,19 @@ dart_ui/                        ← Dart Wasm frontend (no dart:io anywhere --
 
 **Generation queue:** every Ollama call (web chat's `ollama_chat` command, and each Telegram message) is wrapped in `queue::run_queued()`, which enqueues a `{id, preview, source, status}` entry, waits on a shared `tokio::sync::Mutex` so only one generation runs at a time, and broadcasts the queue's contents as a `queue-update` event. The 📋 큐 panel renders this live and shows a count badge even when closed.
 
-**System tray:** `[X]` hides the window (`WindowEvent::CloseRequested` → `window.hide()` + `prevent_close()`) instead of quitting; the Telegram bridge is spawned once in `setup()` independent of the window, so it keeps polling while hidden. Tray icon is built imperatively via `TrayIconBuilder` (not the declarative `tauri.conf.json` `trayIcon` key -- using both created two icons, see BUGFIXES.md).
+**System tray:** `[X]` hides the window (`WindowEvent::CloseRequested` → `window.hide()` + `prevent_close()`) instead of quitting; the Telegram bridge is spawned once in `setup()` independent of the window, so it keeps polling while hidden. Tray icon is built imperatively via `TrayIconBuilder` (not the declarative `tauri.conf.json` `trayIcon` key -- using both created two icons, see BUGFIXES.md). Process priority drops to `IDLE_PRIORITY_CLASS` while hidden and restores to `NORMAL_PRIORITY_CLASS` on show (`src/power.rs`, Windows-only).
+
+**Conversation working memory** (`src/memory.rs`, session-only, not persisted): each source (`"web"`, or `"telegram:{chat_id}"`) keeps its own in-memory turn history. The last 3 turns are replayed to Ollama verbatim; turns 4-8 back are compressed into one short summary via an extra Ollama call (itself routed through the same `queue::run_queued` FIFO, so it never runs concurrently with a real generation); anything older than 8 turns back is dropped with no summary. Attachment payloads (image bytes, extracted file text) are only ever sent for the turn they arrived in -- remembered turns store plain prompt text only, so a multi-turn conversation about a file/image stays coherent without the payload growing every turn.
+
+**Personal persistent memory** (`src/personal_memory.rs`, persisted to `<config dir>/noriter-ai/memory.json`, survives restarts -- distinct from the session-only working memory above): durable facts/preferences about the user. Injected into the front of every request (pinned entries first, then most recently updated, capped at ~2000 chars). Grows two ways: manually via the 🧑 메모리 panel (add/edit/delete/pin), or automatically every 5th turn per source via a short extra Ollama call that either extracts one durable fact or returns `NONE`.
+
+**LLM wiki** (`src/wiki.rs`, persisted to `<config dir>/noriter-ai/wiki/index.json`): user-curated documents (title/summary/body/tags/related_ids) via the 📚 위키 panel. Unlike personal memory, entries are never auto-injected into requests and never auto-created -- it's a "look things up" store, not an "always on" one, to avoid every conversation turning into wiki noise.
 
 **Not yet ported from the v0.1.2 Dart build** (explicitly deferred, not accidental gaps):
-- Chat history / Telegram conversation context persistence -- every message is a fresh 1-turn exchange, nothing survives a restart
+- Chat history *persistence* -- working memory (above) covers same-session follow-ups, but nothing survives an app restart
 - Ollama streaming responses (token-by-token) -- `ollama_chat` waits for the full response
-- Telegram photo/document attachments
 - Config file encryption (bot token currently stored as plaintext JSON)
 - Window chrome control (frameless/opacity/always-on-top)
-- Cold-start memory budget / background process-priority tuning
 - Installer packaging (`.msi`/`.exe`) -- only `cargo tauri dev` has been run
 
 ### Logging (v0.1.3)

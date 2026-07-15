@@ -2,6 +2,20 @@
 
 See [BUGFIXES.md](BUGFIXES.md) for a detailed, symptom → root cause → fix log of every bug found during development.
 
+## [0.1.4] - 2026-07-16
+### Added
+- **Telegram photo/document attachments**: photos are downloaded and sent to Ollama as multimodal `images` (requires a vision-capable model); `.xlsx` documents are parsed into a plain-text table via `calamine`, everything else decoded as UTF-8 text -- both ported from the old Dart bridge's attachment handling.
+- **📝 프롬프트 panel**: a dedicated button/panel to view and edit the "첨부파일 기본 프롬프트" (used when a Telegram photo/document arrives with no caption) -- previously buried inside the 텔레그램 panel.
+- **Conversation working memory** (session-only, not persisted): last 3 turns replayed verbatim, turns 4-8 back compressed into a short summary (one extra Ollama call), anything older dropped. Applies separately to web chat and each Telegram chat. Attachment payloads are never carried into remembered turns -- only their plain text.
+- **Cold-start / background tuning**: release profile now builds with `opt-level="s"`, LTO, and stripped symbols; process priority drops to idle while the window is hidden (tray) and restores on show.
+- Added a Tauri `capabilities/default.json` -- was missing entirely, which silently blocked the `queue-update`/`telegram-event` frontend event listeners (custom commands worked regardless since they aren't gated by the same ACL).
+- **🧑 메모리 panel -- personal persistent memory**: durable facts about the user (`<config dir>/noriter-ai/memory.json`), injected into every request. Grows manually (add/edit/delete/pin in the panel) or automatically (every 5th turn, a short extra Ollama call extracts one fact or returns `NONE`).
+- **📚 위키 panel -- LLM wiki/encyclopedia**: user-curated documents (`<config dir>/noriter-ai/wiki/index.json`) with title/summary/body/tags. Manual-only (no auto-injection, no auto-creation) -- a "look things up" store, separate in purpose from the always-on personal memory.
+
+### Fixed
+- **Telegram reply to an attachment showed the file dump instead of the generated answer** -- the outgoing message echoed the *full prompt* (including the entire extracted attachment text) above the reply, and the combined string was truncated to Telegram's ~4096-char limit before ever reaching the actual generated answer. Now only a short caption/`[첨부파일]` preview is echoed, and the reply is truncated on its own separate budget. See BUGFIXES.md.
+- `AppConfig` deserialization now has `#[serde(default)]` at the struct level -- without it, any field missing from an on-disk `config.json` (e.g. after adding a new field) silently discarded the *entire* saved config back to defaults, not just the missing field.
+
 ## [0.1.3] - 2026-07-16
 Full rewrite onto **Tauri + Rust**, replacing the v0.1.2 single-EXE Dart server. Not yet packaged as an installer -- runs via `cargo tauri dev` from source. See [SPEC.md](SPEC.md#architecture-v013-tauri--rust) for the new architecture.
 

@@ -1,12 +1,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod config;
+mod memory;
 mod ollama;
+mod personal_memory;
+mod power;
 mod queue;
 mod telegram;
+mod wiki;
 
 use config::AppConfig;
+use memory::MemoryState;
+use personal_memory::{MemoryEntry, PersonalMemoryState};
 use queue::QueueState;
+use wiki::{WikiEntry, WikiState};
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
@@ -80,20 +87,106 @@ struct ChatReply {
 }
 
 #[tauri::command]
-async fn ollama_chat(app: AppHandle, model: String, prompt: String, num_ctx: u32) -> Result<ChatReply, String> {
+async fn ollama_chat(
+    app: AppHandle,
+    memory: State<'_, MemoryState>,
+    personal_memory: State<'_, PersonalMemoryState>,
+    model: String,
+    prompt: String,
+    num_ctx: u32,
+) -> Result<ChatReply, String> {
     let preview: String = prompt.chars().take(60).collect();
-    let messages = vec![ollama::ChatMessage {
-        role: "user".into(),
-        content: prompt,
-    }];
-    queue::run_queued(&app, "web", preview, ollama::chat(&model, &messages, num_ctx))
+
+    let mut messages = Vec::new();
+    if let Some(pm) = personal_memory::context_message(&personal_memory) {
+        messages.push(pm);
+    }
+    messages.extend(memory::build_messages(&app, &memory, "web", &model, num_ctx, &prompt, None).await);
+
+    let result = queue::run_queued(&app, "web", preview, ollama::chat(&model, &messages, num_ctx))
         .await
-        .map(|r| ChatReply {
-            content: r.content,
-            tokens_used: r.tokens_used,
-            elapsed_ms: r.elapsed_ms,
-        })
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    memory::record_turn(&memory, "web", &prompt, &result.content);
+
+    // Fire-and-forget: occasionally extracts a durable fact about the user
+    // in the background so it never adds latency to the reply itself.
+    {
+        let app2 = app.clone();
+        let model2 = model.clone();
+        let prompt2 = prompt.clone();
+        let content2 = result.content.clone();
+        tauri::async_runtime::spawn(async move {
+            let pm_state = app2.state::<PersonalMemoryState>();
+            personal_memory::maybe_extract(&app2, &pm_state, "web", &model2, num_ctx, &prompt2, &content2).await;
+        });
+    }
+
+    Ok(ChatReply {
+        content: result.content,
+        tokens_used: result.tokens_used,
+        elapsed_ms: result.elapsed_ms,
+    })
+}
+
+#[tauri::command]
+fn personal_memory_list(state: State<PersonalMemoryState>) -> Vec<MemoryEntry> {
+    personal_memory::list(&state)
+}
+
+#[tauri::command]
+fn personal_memory_add(state: State<PersonalMemoryState>, content: String, category: String, pinned: bool) -> MemoryEntry {
+    personal_memory::add(&state, content, category, "manual".to_string(), pinned)
+}
+
+#[tauri::command]
+fn personal_memory_update(
+    state: State<PersonalMemoryState>,
+    id: String,
+    content: Option<String>,
+    category: Option<String>,
+    pinned: Option<bool>,
+) -> Result<(), String> {
+    personal_memory::update(&state, &id, content, category, pinned)
+}
+
+#[tauri::command]
+fn personal_memory_delete(state: State<PersonalMemoryState>, id: String) {
+    personal_memory::delete(&state, &id)
+}
+
+#[tauri::command]
+fn wiki_list(state: State<WikiState>) -> Vec<WikiEntry> {
+    wiki::list(&state)
+}
+
+#[tauri::command]
+fn wiki_save(
+    state: State<WikiState>,
+    title: String,
+    summary: String,
+    body: String,
+    tags: Vec<String>,
+    related_ids: Vec<String>,
+) -> WikiEntry {
+    wiki::save(&state, title, summary, body, tags, "manual".to_string(), related_ids)
+}
+
+#[tauri::command]
+fn wiki_update(
+    state: State<WikiState>,
+    id: String,
+    title: Option<String>,
+    summary: Option<String>,
+    body: Option<String>,
+    tags: Option<Vec<String>>,
+) -> Result<(), String> {
+    wiki::update(&state, &id, title, summary, body, tags)
+}
+
+#[tauri::command]
+fn wiki_delete(state: State<WikiState>, id: String) {
+    wiki::delete(&state, &id)
 }
 
 fn main() {
@@ -101,6 +194,9 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .manage(TelegramState::default())
         .manage(QueueState::default())
+        .manage(MemoryState::default())
+        .manage(PersonalMemoryState::default())
+        .manage(WikiState::default())
         .invoke_handler(tauri::generate_handler![
             load_config,
             save_config,
@@ -109,6 +205,14 @@ fn main() {
             ollama_models,
             ollama_running_models,
             ollama_chat,
+            personal_memory_list,
+            personal_memory_add,
+            personal_memory_update,
+            personal_memory_delete,
+            wiki_list,
+            wiki_save,
+            wiki_update,
+            wiki_delete,
         ])
         .setup(|app| {
             // Always-on Telegram bridge: started once at launch (if already
@@ -144,6 +248,7 @@ fn main() {
                         if let Some(win) = app.get_webview_window("main") {
                             let _ = win.show();
                             let _ = win.set_focus();
+                            power::set_background(false);
                         }
                     }
                     "quit" => app.exit(0),
@@ -155,6 +260,7 @@ fn main() {
                         if let Some(win) = app.get_webview_window("main") {
                             let _ = win.show();
                             let _ = win.set_focus();
+                            power::set_background(false);
                         }
                     }
                 })
@@ -165,9 +271,13 @@ fn main() {
         .on_window_event(|window, event| {
             // Close ([X]) hides instead of quitting so the Telegram bridge
             // (spawned once in setup, independent of the window) keeps running.
+            // Also drops process priority to IDLE while hidden -- nothing
+            // running in the background (Telegram poll, an in-flight Ollama
+            // request) needs to compete with foreground apps for CPU.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 window.hide().ok();
                 api.prevent_close();
+                power::set_background(true);
             }
         })
         .run(tauri::generate_context!())
