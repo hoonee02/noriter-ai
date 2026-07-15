@@ -4,8 +4,10 @@ Written for whichever agent/person picks this up next. See also
 [SPEC.md](SPEC.md) (architecture), [CHANGELOG.md](CHANGELOG.md) (release
 history), [BUGFIXES.md](BUGFIXES.md) (symptom → root cause → fix log).
 
-Branch: `agents/project-brief-overview`. Current version: `v0.1.1`
-(`noriter-ai-0.1.1.exe` at repo root).
+Branch: `agents/project-brief-overview`. Current version: `v0.1.2` (final,
+confirmed by user), `noriter-ai-0.1.2.exe` at repo root. Every commit on this
+branch has been pushed to `origin` on GitHub -- that push *is* the backup;
+there's no separate backup artifact to look for.
 
 ---
 
@@ -78,6 +80,56 @@ Branch: `agents/project-brief-overview`. Current version: `v0.1.1`
     so a message's `content` can be either a plain string or a multimodal
     parts array. `gemma3:4b` is the vision-capable pick in the recommended
     list; `gemma3:1b` and the EXAONE/Phi-3/Llama entries are text-only.
+16. **EXAONE-4.5-33B, Moondream-1.8B, Gemma-4-12B added to the recommended
+    list** — EXAONE-4.5-33B is LG's *only* vision-capable EXAONE (no small
+    variant exists; pulled via `hf.co/mradermacher/EXAONE-4.5-33B-i1-GGUF:Q2_K`,
+    ~10GB, explicitly labeled ⚠ slow on a 6GB-VRAM GPU). Moondream-1.8b is the
+    properly hardware-appropriate vision pick (fast, fits comfortably).
+    Gemma-4-12b is a newer-generation, similarly-sized upgrade over
+    `gemma3:4b` (256K context vs 128K, ~7.6GB vs ~7.2GB download for the
+    `gemma4:e2b` edge variant).
+17. **Telegram image analysis** — photos sent to the bot are downloaded via
+    `getFile` and sent through the same multimodal path as the web chat's
+    image attachment, with the same vision-capability pre-check.
+18. **Excel (.xlsx) attachment** — new `excel_service.dart` (pure Dart, no
+    native deps) converts uploaded bytes to a plain-text table, then reuses
+    the exact same text-attachment path as any other file. **PDF was
+    explicitly deferred** -- the only viable Dart PDF-text libraries require
+    bundling native DLLs alongside the EXE, which breaks the single-file
+    distribution model; user chose Excel-only for this scope, revisit PDF
+    separately if that tradeoff becomes acceptable later.
+19. **Telegram file (document) attachments were being silently dropped** --
+    Telegram sends non-photo attachments as a `document` field, completely
+    separate from `photo`/`text`/`caption`, and the bridge never checked it.
+    An Excel file sent via Telegram got only the bare caption forwarded (no
+    file content), producing a confusing empty-response error. Fixed by
+    downloading `document` the same way as photos and embedding its content
+    like the web chat's file attachment (`.xlsx` via `excelBytesToText()`,
+    else UTF-8 text). Also fixed a stale "LM Studio" wording left over from
+    before the Ollama swap in `local_agent.dart`'s empty-response error.
+20. **Visual request queue** — web chat and Telegram previously called into
+    the same `_agent`/`_cancelled` fields with **no serialization** -- a
+    latent race where two near-simultaneous requests (either surface) could
+    run the agent concurrently and interleave history/broadcast events.
+    Fixed with `_runQueued()`: a single `Future`-chained FIFO both entry
+    points now go through. Queue state is broadcast as `queueUpdate` and
+    rendered as a "📋 Request Queue" panel above the chat (💬 web / ✈️
+    telegram badges), visible only when something is waiting/running.
+21. **Token count + generation time per reply** — `OnFinalAnswer` now carries
+    optional `tokensUsed`/`elapsedMs` (summed/measured across the whole
+    turn, including tool-calling iterations). Persisted on `ChatEntry` so it
+    survives a reload. Rendered as "N tokens · X.Xs" under each assistant
+    message. Verified live: a real reply rendered "1930 tokens · 14.9s".
+22. **Context-size "Apply" button** — context size can't change on an
+    already-running model without a reload (llama.cpp/Ollama allocate the KV
+    cache at load time); the slider previously only applied on the *next*
+    Run. New `applyContextSize` WS message reloads the active model
+    in-place, but is rejected server-side (via an `error` broadcast) if the
+    queue is non-empty or no model is active -- and disabled client-side
+    the same way, so it's never even clickable mid-generation.
+23. **Timestamps now date-aware** — `HH:mm` for today's messages, `MM/DD
+    HH:mm` (`YYYY/MM/DD HH:mm` across a year boundary) for older ones.
+    Previously always time-only, ambiguous once history spans multiple days.
 
 ---
 
@@ -91,20 +143,32 @@ through it produced a correct, coherent reply (confirmed *after* the
 message-type widening for image support too, so that refactor didn't
 regress ordinary text chat either).
 
-**Still not verified**: the actual image-upload → vision-model-sees-it path
-(item 15). No test image file was available in the sandbox this was built
-in. Recommended before relying on it:
-1. Pull `gemma3:4b` from the Engine panel.
-2. Run it, then attach a real image via 📎 and ask something about it.
-3. Confirm the reply describes the image's actual content, not a generic
-   "I can't see images" refusal (which would mean the multimodal payload
-   isn't reaching the model correctly -- check Ollama's `/v1/chat/completions`
-   image_url format expectations first if that happens).
+**Image upload → vision model (item 15) is now confirmed working** on the
+user's real hardware with `moondream:1.8b` -- it correctly described a real
+screenshot's contents. That run also surfaced two follow-up bugs, both
+fixed: (a) a tiny vision model's 2K context window was blown by the full
+tool-calling system prompt on a second image request, causing prompt-echo/
+gibberish -- fixed by using a short direct prompt + dropping prior history
+for image turns; (b) sending an image while a non-vision model was loaded
+surfaced Ollama's raw rejection JSON -- fixed with an upfront
+`modelSupportsVision()` check (see BUGFIXES.md for both).
 
-Also still worth a look if you're in this area next: Telegram bridge and
-text file attachment haven't been *specifically* re-verified against Ollama
-(only against the old llama.cpp backend originally) -- they go through the
-same `LocalAgent` code path so should be fine, but haven't been re-run.
+**Still not independently verified in this sandbox** (no way to trigger
+them here, but each is a small, low-risk code path):
+- Telegram *document* (file/Excel) attachment end-to-end against a live
+  Telegram chat -- verified via `dart analyze` + a standalone script that
+  fed a real in-memory .xlsx through `excelBytesToText()` directly, and the
+  app boots/runs the Telegram bridge without error, but no actual Telegram
+  message was sent in this environment.
+- The request queue actually visibly queuing multiple entries (item 20) --
+  confirmed it doesn't crash the server, but reproducing genuine queue
+  depth > 1 needs two real overlapping requests, which wasn't set up here.
+- Context-size Apply button's *enabled* state end-to-end (confirmed
+  correctly *disabled* when no model is running; the enabled+reload path
+  wasn't exercised because the Ollama model list wasn't populating in this
+  session's browser test for unrelated reasons -- worth a quick manual
+  check: load a model, confirm Apply enables, click it, confirm the model
+  reloads and `engineStatus` cycles through `starting` → `ready`).
 
 ---
 
@@ -128,6 +192,21 @@ same `LocalAgent` code path so should be fine, but haven't been re-run.
 - **`src/` (legacy VS Code extension, TypeScript)** was never touched this
   session and is increasingly stale relative to `dart_platform/`. Not in
   scope unless someone explicitly asks for VS Code extension work again.
+- **PDF support was deferred, not rejected** -- see item 18. If a native-DLL
+  bundling approach becomes acceptable (or a pure-Dart option shows up),
+  `pdf_text_extraction` (xpdf-based FFI bindings) was the one viable
+  candidate found; revisit if the user asks for PDF again.
+- **`excel: ^4.0.6` was added to `pubspec.yaml` by the user directly**
+  (outside this agent's edits) before the Excel feature was implemented --
+  worth knowing in case the dependency's origin is confusing later; it's
+  now genuinely used by `excel_service.dart`.
+- **The request queue is a single global FIFO**, not per-chat-session --
+  fine for this single-user desktop app, but would need rethinking if
+  multi-user/multi-workspace support is ever added.
+- **EXAONE-4.5-33B is genuinely slow** on the reference hardware (6GB VRAM +
+  32GB RAM) -- it's intentionally included anyway per explicit user request
+  for an EXAONE-specific vision option, with a ⚠ warning in its label. Don't
+  "fix" this by removing it without checking with the user first.
 
 ---
 
@@ -144,7 +223,21 @@ same `LocalAgent` code path so should be fine, but haven't been re-run.
   in the Browser pane** (`get_page_text`/`read_page`/`computer` click), not
   just by reading the generated HTML. Worth doing the same for future UI
   changes — `assets.dart` is a giant inline HTML/CSS/JS string with no
-  compile-time checking of the JS portion.
+  compile-time checking of the JS portion. `javascript_tool` (direct
+  `document.getElementById(...).click()`) turned out more reliable than
+  `computer` clicks by coordinate/ref for this app's UI in a later session.
+- **Be careful with `cd ..` in Bash** — the working directory is a git
+  worktree nested several levels under the user's real OneDrive folder;
+  more than once a `cd ..` chain (e.g. from `dart_platform/` expecting one
+  level up) overshot into the OneDrive root itself, which is full of the
+  user's personal files. No harm was done (only ever ran read-only `git
+  status` there before catching it and it auto-recovers), but prefer
+  absolute paths or `git -C "<repo path>"` over relative `cd ..` chains.
+- **The user often has their own instance of the app running in parallel**
+  (multiple sessions this project saw a live Ollama pull or chat already in
+  progress on a "fresh" test launch) -- if `tasklist | grep noriter` shows
+  a running exe you didn't start, ask before killing it rather than
+  assuming it's a stale leftover.
 - **`.noriter-ai/chat-history.json` and `.noriter-ai/last-engine.json` are
   session state, not source** — don't commit changes to them unless the
   user specifically asks. They get modified just by running the app.
