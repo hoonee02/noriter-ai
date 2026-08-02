@@ -165,14 +165,21 @@ impl WikiEntry {
     }
 }
 
-/// Re-derives disambiguators for every page sharing `title`.
+/// Re-derives disambiguators for every page sharing `title`. Returns `true`
+/// when the group turned out to be a real duplicate, leaving the logging to
+/// the caller.
+///
+/// Keeping the write out of here is what makes the function testable: it
+/// touches only the slice it is given, so tests do not append to the real
+/// `wiki/log.md` in the user's config directory.
 ///
 /// Runs on both save and delete, and rewrites the *whole* group rather than
 /// just the new page. Tagging only the newcomer would leave `영업이익률` and
 /// `영업이익률(LG전자)` side by side, where the untagged one silently reads
 /// as the canonical one; and on delete, the survivor's suffix has to come
 /// back off once there is nothing left to distinguish it from.
-fn reconcile_disambiguators(entries: &mut [WikiEntry], title: &str) {
+#[must_use]
+fn reconcile_disambiguators(entries: &mut [WikiEntry], title: &str) -> bool {
     let group: Vec<usize> = entries
         .iter()
         .enumerate()
@@ -184,7 +191,7 @@ fn reconcile_disambiguators(entries: &mut [WikiEntry], title: &str) {
         for i in group {
             entries[i].disambiguator = None;
         }
-        return;
+        return false;
     }
 
     for axis in AXES {
@@ -204,7 +211,7 @@ fn reconcile_disambiguators(entries: &mut [WikiEntry], title: &str) {
         for &i in &group {
             entries[i].disambiguator = axis_disambiguator(&entries[i], axis);
         }
-        return;
+        return false;
     }
 
     // Same title, same company, same period: this is not an ambiguity to
@@ -213,7 +220,14 @@ fn reconcile_disambiguators(entries: &mut [WikiEntry], title: &str) {
     for &i in &group {
         entries[i].disambiguator = None;
     }
-    log_append("duplicate", &format!("{title} -- 구분 축이 없어 중복으로 보입니다 (병합 검토)"));
+    true
+}
+
+/// Applies `reconcile_disambiguators` and records a duplicate if one showed up.
+fn reconcile_and_log(entries: &mut [WikiEntry], title: &str) {
+    if reconcile_disambiguators(entries, title) {
+        log_append("duplicate", &format!("{title} -- 구분 축이 없어 중복으로 보입니다 (병합 검토)"));
+    }
 }
 
 fn wiki_dir() -> PathBuf {
@@ -442,7 +456,7 @@ pub fn promote(draft: &DraftState, wiki: &WikiState, id: &str) -> Result<WikiEnt
     // Promotion is the moment a draft joins the store where titles are
     // anchors, so it can create a clash the draft never had (D-08 ④).
     let title = entries.last().expect("just pushed").title.clone();
-    reconcile_disambiguators(&mut entries, &title);
+    reconcile_and_log(&mut entries, &title);
     save_to(index_path(), &entries);
 
     let entry = entries.last().expect("just pushed").clone();
@@ -515,7 +529,7 @@ pub fn save(state: &WikiState, page: NewPage) -> WikiEntry {
     // D-08 ④: a new page can make an existing one ambiguous, so the whole
     // same-title group is re-derived, not just this entry.
     let title = entries.last().expect("just pushed").title.clone();
-    reconcile_disambiguators(&mut entries, &title);
+    reconcile_and_log(&mut entries, &title);
     save_to(index_path(), &entries);
 
     let entry = entries.last().expect("just pushed").clone();
@@ -561,7 +575,7 @@ pub fn delete(state: &WikiState, id: &str) {
     entries.retain(|e| e.id != id);
     // Deleting can resolve a clash, and then the survivor's suffix has to go.
     if let Some(title) = removed {
-        reconcile_disambiguators(&mut entries, &title);
+        reconcile_and_log(&mut entries, &title);
     }
     save_to(index_path(), &entries);
 }
@@ -1043,7 +1057,7 @@ mod tests {
             titled("영업이익률", Some("A"), None),
             titled("영업이익률", Some("B"), None),
         ];
-        reconcile_disambiguators(&mut entries, "영업이익률");
+        let _ = reconcile_disambiguators(&mut entries, "영업이익률");
 
         assert_eq!(entries[0].canonical_title(), "영업이익률(A사)");
         assert_eq!(entries[1].canonical_title(), "영업이익률(B사)");
@@ -1058,7 +1072,7 @@ mod tests {
             titled("영업이익률", Some("A"), Some("2025-FY")),
             titled("영업이익률", Some("A"), Some("2024-FY")),
         ];
-        reconcile_disambiguators(&mut entries, "영업이익률");
+        let _ = reconcile_disambiguators(&mut entries, "영업이익률");
 
         assert_eq!(entries[0].disambiguator, Some(Disambiguator::Period("2025-FY".into())));
         assert_eq!(entries[1].disambiguator, Some(Disambiguator::Period("2024-FY".into())));
@@ -1073,7 +1087,7 @@ mod tests {
             titled("영업이익률", Some("A"), Some("2025-FY")),
             titled("영업이익률", Some("A"), Some("2025-FY")),
         ];
-        reconcile_disambiguators(&mut entries, "영업이익률");
+        let _ = reconcile_disambiguators(&mut entries, "영업이익률");
 
         assert!(entries.iter().all(|e| e.disambiguator.is_none()));
     }
@@ -1086,11 +1100,11 @@ mod tests {
             titled("영업이익률", Some("A"), None),
             titled("영업이익률", Some("B"), None),
         ];
-        reconcile_disambiguators(&mut entries, "영업이익률");
+        let _ = reconcile_disambiguators(&mut entries, "영업이익률");
         assert!(entries[0].disambiguator.is_some());
 
         entries.remove(1);
-        reconcile_disambiguators(&mut entries, "영업이익률");
+        let _ = reconcile_disambiguators(&mut entries, "영업이익률");
         assert_eq!(entries[0].canonical_title(), "영업이익률");
     }
 
