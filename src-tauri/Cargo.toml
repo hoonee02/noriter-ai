@@ -1,6 +1,6 @@
 [package]
 name = "noriter-ai"
-version = "0.1.4"
+version = "0.1.5"
 description = "Noriter AI - offline AI assistant with Telegram bridge"
 edition = "2021"
 

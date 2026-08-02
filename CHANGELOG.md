@@ -2,7 +2,13 @@
 
 See [BUGFIXES.md](BUGFIXES.md) for a detailed, symptom → root cause → fix log of every bug found during development.
 
-## [Unreleased]
+## [0.1.5.2] - 2026-08-03
+
+Versioning note: the design documents run to **v0.1.5.2** (D1 → D2 → D3 →
+v0.1.5.1 → checklist v0.1.5.2), and the shipped binary is named after that
+document revision -- `noriter-ai-0.1.5.2.exe`. Cargo and Tauri only accept
+three-part semver, so the package version reads `0.1.5`.
+
 ### Added
 - **Wiki Ingest/Query/Lint** (extends the 📚 위키 panel from 0.1.4): three LLM-driven operations inspired by the "LLM wiki" pattern (accumulate structured knowledge over time instead of re-deriving it per query, à la Karpathy's write-up).
   - **Ingest**: paste raw source text -> one extra Ollama call turns it into a structured page (title/summary/tags/body via a parsed `TITLE:`/`SUMMARY:`/`TAGS:`/`BODY:` response, not JSON -- more reliable with small local models) and saves it.
