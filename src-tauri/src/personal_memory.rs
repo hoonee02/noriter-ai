@@ -5,7 +5,7 @@
 //! and can also grow automatically: every 5th turn (per source), a short
 //! extra Ollama call checks whether anything durable should be remembered.
 
-use crate::ollama::{self, ChatMessage};
+use crate::ollama::ChatMessage;
 use crate::queue;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -179,11 +179,13 @@ pub async fn maybe_extract(
          새로 기억해둘 만한 게 없다면 정확히 NONE 이라고만 답해."
     );
     let messages = vec![ChatMessage::text("user", prompt)];
-    let result = queue::run_queued(
+    let result = queue::call_llm(
         app,
         "memory-extract",
         "(개인 메모리 추출)".to_string(),
-        ollama::chat(model, &messages, num_ctx),
+        model,
+        &messages,
+        num_ctx,
     )
     .await;
 

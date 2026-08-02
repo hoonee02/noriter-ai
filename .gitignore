@@ -18,6 +18,10 @@ dist/
 .noriter-ai/telegram-config.json
 .noriter-ai/chat-history.json
 .noriter-ai/last-engine.json
+# Held a Telegram bot token in plain text until 2026-08-02. Untracked now so
+# per-machine settings stop reaching the repo -- note that ignoring a file
+# does nothing while it is still tracked, which is how it stayed in for so long.
+.vscode/settings.json
 
 # Tauri + Rust rewrite (v0.1.3+) build artifacts
 src-tauri/target/

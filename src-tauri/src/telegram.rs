@@ -1,6 +1,5 @@
 use crate::config;
 use crate::memory::MemoryState;
-use crate::ollama;
 use base64::Engine;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
@@ -152,11 +151,13 @@ pub async fn run(app: AppHandle, bot_token: String, model: Option<String>, num_c
                     );
 
                     let preview: String = text.chars().take(60).collect();
-                    let result = crate::queue::run_queued(
+                    let result = crate::queue::call_llm(
                         &app,
                         "telegram",
                         preview,
-                        ollama::chat(model, &messages, num_ctx),
+                        model,
+                        &messages,
+                        num_ctx,
                     )
                     .await;
 

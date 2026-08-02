@@ -2,6 +2,32 @@
 
 See [BUGFIXES.md](BUGFIXES.md) for a detailed, symptom → root cause → fix log of every bug found during development.
 
+## [Unreleased]
+### Added
+- **Wiki Ingest/Query/Lint** (extends the 📚 위키 panel from 0.1.4): three LLM-driven operations inspired by the "LLM wiki" pattern (accumulate structured knowledge over time instead of re-deriving it per query, à la Karpathy's write-up).
+  - **Ingest**: paste raw source text -> one extra Ollama call turns it into a structured page (title/summary/tags/body via a parsed `TITLE:`/`SUMMARY:`/`TAGS:`/`BODY:` response, not JSON -- more reliable with small local models) and saves it.
+  - **Query**: ask a question -> answered using the wiki's contents as context, and the answer accumulates instead of vanishing into chat history. (Answers now land in a review queue rather than the wiki itself -- see the two-store split below.)
+  - **Lint**: asks the model to review the title/summary/tag index for contradictions, orphaned pages, under-covered concepts, and follow-up questions -- a report, not a stored page.
+  - `wiki/log.md`: append-only, grep-able activity log (`## [date] action | title`), written on every save/lint.
+
+- **OpenDART integration** (`dart.rs`): downloads the corp-code directory once and caches it to `dart/corp_codes.json`, then resolves company names locally. Gives every company one stable key, so `삼성전자`, `삼성전자(주)` and `005930` stop being three different companies. API key lives in `config.json` and is entered in ⚙ 설정. This is the app's first outbound request -- it fetches one specific table on demand, so the "no crawling" rule still holds, but "offline" is now "offline after the first fetch".
+- **🏢 company scope + 📝 검토 대기** in the 위키 panel, plus per-page 기업/회계 기간/재무 수치 여부 fields.
+
+### Fixed
+Design review of the v0.1.5 agent architecture surfaced eight defects in the existing wiki code (3 Critical, 5 High). All are now fixed; each shipped with a regression test reproducing the original failure (20 tests total). Every one of them was silent -- the app kept working and returned plausible answers while the result was wrong.
+
+- **Queue re-entrancy deadlock**: a coordinating function that ran itself through the generation queue and then called a sub-agent would wait on a non-reentrant lock forever. `queue::call_llm` is now the only entry point, and `run_queued` is private -- so the deadlock is ruled out by the compiler rather than by remembering the rule.
+- **Wiki wiped on schema change**: adding a field to `WikiEntry` made the whole index fail to parse, the loader silently started empty, and the next save overwrote the file. Now `#[serde(default)]` at the struct level (the same fix `AppConfig` got in 0.1.4, which had not been applied here).
+- **Query answers self-contaminating the wiki**: generated answers were saved straight into the wiki and became evidence for the next answer. Split into two stores -- `draft.json` (never read back) and `index.json` (promoted) -- so the feedback path no longer exists rather than being filtered out. Promotion is an explicit step in 📝 검토 대기.
+- **Context threshold discarded all bodies**: one `< 6000` check chose between the entire wiki and titles-only, so a single financial statement pushed every body out while the answer still looked fine. Replaced with ranked tiers and a budget derived from `num_ctx` (`preflight.rs`). Pages whose figures cannot survive summarising are dropped and **named in the answer** instead of being reduced to a number-free summary.
+- **No company scope**: one company's figures could be cited in another's analysis -- and the verification agent would confirm them, since the number really was in the wiki. Reads are now scoped by `corp_code`, with company-agnostic concept pages still included; an unscoped answer says so.
+- **ID collisions**: millisecond-precision ids collided in tight save loops, after which editing a page touched only the first and deleting it removed both. Now timestamp + atomic counter.
+- **Non-atomic index writes**: a crash mid-save left a truncated file that the loader treated as an empty wiki. Now temp-file + rename.
+- **Parser silently produced empty pages**: `BODY:` was honoured only as an exact standalone line, so a model writing `BODY: 내용` yielded a page with no body -- saved without complaint. Label matching now tolerates markdown, case and leading text; an empty body or title is an explicit failure, retried three times before being handed to `wiki/미결작업.md`. The `"제목 없음"` fallback is gone (titles are link anchors, so a shared placeholder collides unrelated pages), and same-title pages get a `제목(구분자)` suffix derived from company or period.
+
+### Security
+- **A Telegram bot token was committed in plain text** in `.vscode/settings.json` (since `0.0.5`) and reached the remote. The value has been cleared and the file untracked, but **the token in git history must be treated as compromised and revoked via BotFather** -- clearing it here does not un-publish it. `.noriter-ai/chat-history.json` was likewise tracked despite being listed in `.gitignore`; both are now untracked (ignoring a file has no effect while it is still tracked, which is how these persisted).
+
 ## [0.1.4] - 2026-07-16
 ### Added
 - **Telegram photo/document attachments**: photos are downloaded and sent to Ollama as multimodal `images` (requires a vision-capable model); `.xlsx` documents are parsed into a plain-text table via `calamine`, everything else decoded as UTF-8 text -- both ported from the old Dart bridge's attachment handling.

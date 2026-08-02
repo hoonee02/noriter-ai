@@ -21,6 +21,10 @@ pub struct AppConfig {
     /// (e.g. some clients' "send as file" flow), so without this the
     /// message would fall back to a generic "첨부된 파일을 확인해주세요."
     pub attachment_prompt: Option<String>,
+    /// OpenDART API key. Lives only in config.json, never in the repo --
+    /// same handling as `telegram_bot_token`. Without it the DART features
+    /// stay switched off rather than failing at call time.
+    pub opendart_api_key: Option<String>,
 }
 
 fn config_path() -> PathBuf {

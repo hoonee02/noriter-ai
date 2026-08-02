@@ -14,7 +14,7 @@
 //! multi-turn conversation about a file/image stays coherent without the
 //! payload growing every turn.
 
-use crate::ollama::{self, ChatMessage};
+use crate::ollama::ChatMessage;
 use crate::queue;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
@@ -132,11 +132,13 @@ async fn summarize(app: &AppHandle, model: &str, num_ctx: u32, turns: &[Turn]) -
     );
     let messages = vec![ChatMessage::text("user", prompt)];
 
-    let result = queue::run_queued(
+    let result = queue::call_llm(
         app,
         "memory-summary",
         "(대화 요약 생성)".to_string(),
-        ollama::chat(model, &messages, num_ctx),
+        model,
+        &messages,
+        num_ctx,
     )
     .await;
 

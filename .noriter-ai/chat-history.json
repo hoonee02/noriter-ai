@@ -1,1 +1,0 @@
-[{"type":"user","text":"안녕","timestamp":1783534119950},{"type":"error","text":"API Error: ClientException with SocketException: 원격 컴퓨터가 네트워크 연결을 거부했습니다 (OS Error: 원격 컴퓨터가 네트워크 연결을 거부했습니다, errno = 1225), address = 127.0.0.1, port = 8709, uri=http://127.0.0.1:8080/v1/chat/completions","timestamp":1783534122003}]

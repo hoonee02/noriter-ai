@@ -1,19 +1,22 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod config;
+mod dart;
 mod memory;
 mod ollama;
 mod personal_memory;
 mod power;
+mod preflight;
 mod queue;
 mod telegram;
 mod wiki;
 
 use config::AppConfig;
+use dart::DartState;
 use memory::MemoryState;
 use personal_memory::{MemoryEntry, PersonalMemoryState};
 use queue::QueueState;
-use wiki::{WikiEntry, WikiState};
+use wiki::{DraftState, WikiEntry, WikiState};
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
@@ -103,9 +106,7 @@ async fn ollama_chat(
     }
     messages.extend(memory::build_messages(&app, &memory, "web", &model, num_ctx, &prompt, None).await);
 
-    let result = queue::run_queued(&app, "web", preview, ollama::chat(&model, &messages, num_ctx))
-        .await
-        .map_err(|e| e.to_string())?;
+    let result = queue::call_llm(&app, "web", preview, &model, &messages, num_ctx).await?;
 
     memory::record_turn(&memory, "web", &prompt, &result.content);
 
@@ -156,20 +157,50 @@ fn personal_memory_delete(state: State<PersonalMemoryState>, id: String) {
 }
 
 #[tauri::command]
-fn wiki_list(state: State<WikiState>) -> Vec<WikiEntry> {
-    wiki::list(&state)
+fn wiki_list(state: State<WikiState>) -> Vec<wiki::WikiEntryView> {
+    wiki::list_view(&state)
 }
 
+/// D-05b: `company` is resolved through the DART directory rather than
+/// stored as typed. A free-text company name would scatter one firm's pages
+/// across spelling variants, and the read filter would then hide data while
+/// appearing to work (D-05c). An unresolved name stores no scope at all --
+/// better an unscoped page than one filed under the wrong company.
 #[tauri::command]
 fn wiki_save(
     state: State<WikiState>,
+    dart_state: State<DartState>,
     title: String,
     summary: String,
     body: String,
     tags: Vec<String>,
-    related_ids: Vec<String>,
+    company: Option<String>,
+    period: Option<String>,
+    body_required: Option<bool>,
 ) -> WikiEntry {
-    wiki::save(&state, title, summary, body, tags, "manual".to_string(), related_ids)
+    let company = company
+        .filter(|c| !c.trim().is_empty())
+        .and_then(|c| dart::lookup(&dart_state, &c));
+
+    wiki::save(
+        &state,
+        wiki::NewPage {
+            title,
+            summary,
+            body,
+            tags,
+            source: "manual".to_string(),
+            // Typed by a person, so it is stated rather than inferred.
+            confidence: wiki::Confidence::Stated,
+            company,
+            period: period.filter(|p| !p.trim().is_empty()),
+            // O-22 leaves it open who sets this automatically (preprocessing
+            // vs Taxonomy); until either exists, the person writing the page
+            // says so.
+            body_required: body_required.unwrap_or(false),
+            ..Default::default()
+        },
+    )
 }
 
 #[tauri::command]
@@ -189,6 +220,93 @@ fn wiki_delete(state: State<WikiState>, id: String) {
     wiki::delete(&state, &id)
 }
 
+#[tauri::command]
+async fn wiki_ingest(
+    app: AppHandle,
+    state: State<'_, WikiState>,
+    model: String,
+    num_ctx: u32,
+    source_text: String,
+    source_label: String,
+) -> Result<WikiEntry, String> {
+    wiki::ingest(&app, &state, &model, num_ctx, &source_text, &source_label).await
+}
+
+/// `scope` is a `corp_code`, not a company name -- resolve it with
+/// `dart_lookup_company` first so one firm's variant spellings converge.
+#[tauri::command]
+async fn wiki_query(
+    app: AppHandle,
+    state: State<'_, WikiState>,
+    draft: State<'_, DraftState>,
+    model: String,
+    num_ctx: u32,
+    question: String,
+    scope: Option<String>,
+) -> Result<String, String> {
+    wiki::query(&app, &state, &draft, &model, num_ctx, &question, scope.as_deref()).await
+}
+
+/// D-03: unpromoted answers, for the review UI. Kept separate from
+/// `wiki_list` so a caller can't accidentally feed drafts back as context.
+#[tauri::command]
+fn wiki_draft_list(draft: State<DraftState>) -> Vec<wiki::WikiEntryView> {
+    wiki::list_draft_view(&draft)
+}
+
+#[tauri::command]
+fn wiki_promote(
+    draft: State<DraftState>,
+    state: State<WikiState>,
+    id: String,
+) -> Result<WikiEntry, String> {
+    wiki::promote(&draft, &state, &id)
+}
+
+#[tauri::command]
+fn wiki_discard_draft(draft: State<DraftState>, id: String) {
+    wiki::discard_draft(&draft, &id)
+}
+
+#[tauri::command]
+async fn wiki_lint(
+    app: AppHandle,
+    state: State<'_, WikiState>,
+    model: String,
+    num_ctx: u32,
+    scope: Option<String>,
+) -> Result<String, String> {
+    wiki::lint(&app, &state, &model, num_ctx, scope.as_deref()).await
+}
+
+#[tauri::command]
+fn wiki_log_tail(lines: usize) -> Vec<String> {
+    wiki::log_tail(lines)
+}
+
+/// How many companies the local DART cache holds -- 0 means "never fetched",
+/// which is what the settings panel shows the user.
+#[tauri::command]
+fn dart_corp_count(state: State<DartState>) -> usize {
+    state.count()
+}
+
+#[tauri::command]
+async fn dart_refresh_corp_codes(state: State<'_, DartState>) -> Result<usize, String> {
+    let Some(key) = config::load().opendart_api_key.filter(|k| !k.trim().is_empty()) else {
+        return Err("OpenDART API 키가 설정되지 않았습니다 (⚙ 설정에서 입력)".into());
+    };
+    dart::refresh_corp_codes(&state, &key).await
+}
+
+/// Name -> canonical company reference. `None` when the cache has no match
+/// or the name is ambiguous; the caller then stores no company scope rather
+/// than a guessed one.
+#[tauri::command]
+fn dart_lookup_company(state: State<DartState>, name: String) -> Option<wiki::CompanyRef> {
+    dart::lookup(&state, &name)
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -197,6 +315,8 @@ fn main() {
         .manage(MemoryState::default())
         .manage(PersonalMemoryState::default())
         .manage(WikiState::default())
+        .manage(DraftState::default())
+        .manage(DartState::loaded())
         .invoke_handler(tauri::generate_handler![
             load_config,
             save_config,
@@ -213,6 +333,16 @@ fn main() {
             wiki_save,
             wiki_update,
             wiki_delete,
+            wiki_ingest,
+            wiki_query,
+            wiki_lint,
+            wiki_log_tail,
+            wiki_draft_list,
+            wiki_promote,
+            wiki_discard_draft,
+            dart_corp_count,
+            dart_refresh_corp_codes,
+            dart_lookup_company,
         ])
         .setup(|app| {
             // Always-on Telegram bridge: started once at launch (if already

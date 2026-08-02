@@ -1,6 +1,0 @@
-{
-    "noriter-ai.telegramBotToken": "8779707413:AAFUODbmA7cjxycKgt0D3hlOPdBpvQCtfME",
-    "noriter-ai.telegramChatId": "8138859090",
-    "typescript.tsdk": "node_modules/typescript/lib",
-    "noriter-ai.telegramEnableChatBridge": true
-}

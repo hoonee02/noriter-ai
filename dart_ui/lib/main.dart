@@ -123,6 +123,53 @@ void main() {
           쌓입니다). 나중에 찾아볼 수 있는 "찾아보는 자료"입니다.
         </p>
         <div id="wikiList" class="entryList"></div>
+
+        <div class="wikiTool">
+          <p class="panelDesc">
+            📝 검토 대기 -- 질문 답변은 여기 쌓이고, <strong>위키에 반영하기 전까지는 다음
+            질문의 근거로 쓰이지 않습니다.</strong> 내용을 확인한 뒤 반영하세요.
+          </p>
+          <div id="wikiDraftList" class="entryList"></div>
+        </div>
+
+        <div class="wikiTool">
+          <label>📥 자료 통합 (Ingest) -- 원문을 붙여넣으면 모델이 제목/요약/태그/본문을 알아서 정리해 저장합니다
+            <textarea id="wikiIngestText" rows="4" placeholder="여기에 원문을 붙여넣으세요"></textarea>
+          </label>
+          <div class="panelActions">
+            <button id="wikiIngestBtn" type="button">통합 실행</button>
+            <span id="wikiIngestStatus"></span>
+          </div>
+        </div>
+
+        <div class="wikiTool">
+          <label>🏢 기업 스코프 -- 비워두면 위키 전체가 대상입니다. 지정하면 그 기업 문서 + 기업 무관 문서만 봅니다
+            <input id="wikiScope" type="text" placeholder="예: 삼성전자 (비워두면 전체)" />
+          </label>
+          <div class="panelActions">
+            <span id="wikiScopeStatus"></span>
+          </div>
+        </div>
+
+        <div class="wikiTool">
+          <label>❓ 위키에 질문 (Query) -- 답변은 위 "검토 대기"에 쌓입니다 (확인 후 반영)
+            <input id="wikiQueryText" type="text" placeholder="예: 저번에 정리한 엑셀 자료 요약해줘" />
+          </label>
+          <div class="panelActions">
+            <button id="wikiQueryBtn" type="button">질문하기</button>
+            <span id="wikiQueryStatus"></span>
+          </div>
+          <div id="wikiQueryAnswer" class="wikiAnswer"></div>
+        </div>
+
+        <div class="wikiTool">
+          <div class="panelActions">
+            <button id="wikiLintBtn" type="button">🔍 위키 점검 (Lint)</button>
+            <span id="wikiLintStatus"></span>
+          </div>
+          <div id="wikiLintReport" class="wikiAnswer"></div>
+        </div>
+
         <label>제목
           <input id="wikiTitle" type="text" placeholder="예: 예제모음.xlsx 데이터 구조" />
         </label>
@@ -134,6 +181,16 @@ void main() {
         </label>
         <label>태그 (쉼표로 구분)
           <input id="wikiTags" type="text" placeholder="excel, telegram" />
+        </label>
+        <label>기업 (선택) -- DART 기업 목록에서 찾은 경우에만 기록됩니다
+          <input id="wikiCompany" type="text" placeholder="예: 삼성전자" />
+        </label>
+        <label>회계 기간 (선택)
+          <input id="wikiPeriod" type="text" placeholder="예: 2025-FY" />
+        </label>
+        <label class="checkbox">
+          <input id="wikiBodyRequired" type="checkbox" />
+          본문에 재무 수치가 있음 -- 컨텍스트가 모자라도 요약으로 대체하지 않고, 대신 제외 사실을 답변에 밝힙니다
         </label>
         <div class="panelActions">
           <button id="wikiSave" type="button">저장</button>
@@ -152,6 +209,15 @@ void main() {
         <div class="panelActions">
           <button id="settingsSave" type="button">저장</button>
           <span id="settingsStatus"></span>
+        </div>
+
+        <label>OpenDART API 키 -- 기업 고유번호 조회에 씁니다. 없으면 기업 스코프 기능이 꺼진 채 동작합니다
+          <input id="cfgDartKey" type="text" placeholder="OpenDART에서 발급받은 키" />
+        </label>
+        <div class="panelActions">
+          <button id="dartKeySave" type="button">키 저장</button>
+          <button id="dartRefresh" type="button">기업 목록 내려받기</button>
+          <span id="dartStatus"></span>
         </div>
       </div>
 
@@ -347,6 +413,14 @@ void _wire() {
   void onSettingsSave(web.Event e) => _saveGeneralSettings();
   settingsSaveBtn.addEventListener('click', onSettingsSave.toJS);
 
+  final dartKeySaveBtn = web.document.getElementById('dartKeySave') as web.HTMLButtonElement;
+  void onDartKeySave(web.Event e) => unawaited(_saveDartKey());
+  dartKeySaveBtn.addEventListener('click', onDartKeySave.toJS);
+
+  final dartRefreshBtn = web.document.getElementById('dartRefresh') as web.HTMLButtonElement;
+  void onDartRefresh(web.Event e) => unawaited(_refreshDartCorpCodes());
+  dartRefreshBtn.addEventListener('click', onDartRefresh.toJS);
+
   final contextSlider = web.document.getElementById('cfgContextSize') as web.HTMLInputElement;
   void onContextSliderInput(web.Event e) {
     web.document.getElementById('cfgContextSizeValue')!.textContent = contextSlider.value;
@@ -369,6 +443,97 @@ void _wire() {
   final wikiCancelBtn = web.document.getElementById('wikiCancelEdit') as web.HTMLButtonElement;
   void onWikiCancel(web.Event e) => _resetWikiForm();
   wikiCancelBtn.addEventListener('click', onWikiCancel.toJS);
+
+  final wikiIngestBtn = web.document.getElementById('wikiIngestBtn') as web.HTMLButtonElement;
+  void onWikiIngest(web.Event e) => unawaited(_runWikiIngest());
+  wikiIngestBtn.addEventListener('click', onWikiIngest.toJS);
+
+  final wikiQueryBtn = web.document.getElementById('wikiQueryBtn') as web.HTMLButtonElement;
+  void onWikiQuery(web.Event e) => unawaited(_runWikiQuery());
+  wikiQueryBtn.addEventListener('click', onWikiQuery.toJS);
+
+  final wikiLintBtn = web.document.getElementById('wikiLintBtn') as web.HTMLButtonElement;
+  void onWikiLint(web.Event e) => unawaited(_runWikiLint());
+  wikiLintBtn.addEventListener('click', onWikiLint.toJS);
+}
+
+Future<Map<String, dynamic>> _currentModelAndCtx() async {
+  final cfg = await tauri.invoke('load_config') as Map?;
+  return {
+    'model': (cfg?['ollama_model'] as String?) ?? 'gemma3:4b',
+    'numCtx': (cfg?['context_size'] as num?)?.toInt() ?? 4096,
+  };
+}
+
+Future<void> _runWikiIngest() async {
+  final status = web.document.getElementById('wikiIngestStatus')!;
+  final textarea = web.document.getElementById('wikiIngestText') as web.HTMLTextAreaElement;
+  final sourceText = textarea.value.trim();
+  if (sourceText.isEmpty) {
+    status.textContent = '통합할 자료를 입력하세요';
+    return;
+  }
+  status.textContent = '통합 중... (형식이 어긋나면 최대 3회까지 다시 시도합니다)';
+  try {
+    final mc = await _currentModelAndCtx();
+    await tauri.invoke('wiki_ingest', {
+      'model': mc['model'],
+      'numCtx': mc['numCtx'],
+      'sourceText': sourceText,
+      'sourceLabel': '수동 입력',
+    });
+    textarea.value = '';
+    status.textContent = '통합 완료 -- 새 문서가 아래 목록에 추가됨';
+    await _loadWikiPanel();
+  } catch (e) {
+    status.textContent = '오류: $e';
+  }
+}
+
+Future<void> _runWikiQuery() async {
+  final status = web.document.getElementById('wikiQueryStatus')!;
+  final answerBox = web.document.getElementById('wikiQueryAnswer')!;
+  final input = web.document.getElementById('wikiQueryText') as web.HTMLInputElement;
+  final question = input.value.trim();
+  if (question.isEmpty) {
+    status.textContent = '질문을 입력하세요';
+    return;
+  }
+  status.textContent = '검색 중...';
+  answerBox.textContent = '';
+  try {
+    final mc = await _currentModelAndCtx();
+    final answer = await tauri.invoke('wiki_query', {
+      'model': mc['model'],
+      'numCtx': mc['numCtx'],
+      'question': question,
+      'scope': await _resolveWikiScope(),
+    }) as String?;
+    answerBox.textContent = answer ?? '(응답 없음)';
+    status.textContent = '완료 -- 답변이 검토 대기에 추가됨';
+    await _loadWikiPanel();
+  } catch (e) {
+    status.textContent = '오류: $e';
+  }
+}
+
+Future<void> _runWikiLint() async {
+  final status = web.document.getElementById('wikiLintStatus')!;
+  final reportBox = web.document.getElementById('wikiLintReport')!;
+  status.textContent = '점검 중...';
+  reportBox.textContent = '';
+  try {
+    final mc = await _currentModelAndCtx();
+    final report = await tauri.invoke('wiki_lint', {
+      'model': mc['model'],
+      'numCtx': mc['numCtx'],
+      'scope': await _resolveWikiScope(),
+    }) as String?;
+    reportBox.textContent = report ?? '(결과 없음)';
+    status.textContent = '완료';
+  } catch (e) {
+    status.textContent = '오류: $e';
+  }
 }
 
 void _renderQueue(List items) {
@@ -509,22 +674,26 @@ Future<void> _verifyOllama() async {
   }
 }
 
+/// Loads the stored config, applies [changes] on top, and saves it back, so
+/// each panel names only the fields it owns.
+///
+/// Every panel used to spell out all fields on save, which meant adding one
+/// field required touching all of them -- miss a spot and saving from that
+/// panel silently wiped whatever the new field held.
+Future<void> _patchConfig(Map<String, dynamic> changes) async {
+  final cfg = Map<String, dynamic>.from(await tauri.invoke('load_config') as Map? ?? {});
+  cfg['context_size'] = (cfg['context_size'] as num?)?.toInt() ?? 4096;
+  cfg['telegram_enabled'] = cfg['telegram_enabled'] ?? false;
+  cfg.addAll(changes);
+  await tauri.invoke('save_config', {'cfg': cfg});
+}
+
 Future<void> _saveModel() async {
   final status = web.document.getElementById('modelStatus')!;
   status.textContent = '저장 중...';
   try {
     final model = (web.document.getElementById('cfgModel') as web.HTMLSelectElement).value;
-    final current = await tauri.invoke('load_config') as Map? ?? {};
-    await tauri.invoke('save_config', {
-      'cfg': {
-        'ollama_model': model,
-        'telegram_bot_token': current['telegram_bot_token'],
-        'telegram_chat_id': current['telegram_chat_id'],
-        'telegram_enabled': current['telegram_enabled'] ?? false,
-        'context_size': (current['context_size'] as num?)?.toInt() ?? 4096,
-        'attachment_prompt': current['attachment_prompt'],
-      },
-    });
+    await _patchConfig({'ollama_model': model});
     status.textContent = '저장됨';
     await _refreshModelHealth();
   } catch (e) {
@@ -548,16 +717,9 @@ Future<void> _saveTelegram() async {
     final token = (web.document.getElementById('cfgToken') as web.HTMLInputElement).value.trim();
     final enabled = (web.document.getElementById('cfgEnabled') as web.HTMLInputElement).checked;
 
-    final current = await tauri.invoke('load_config') as Map? ?? {};
-    await tauri.invoke('save_config', {
-      'cfg': {
-        'ollama_model': current['ollama_model'],
-        'telegram_bot_token': token.isEmpty ? null : token,
-        'telegram_chat_id': current['telegram_chat_id'],
-        'telegram_enabled': enabled,
-        'context_size': (current['context_size'] as num?)?.toInt() ?? 4096,
-        'attachment_prompt': current['attachment_prompt'],
-      },
+    await _patchConfig({
+      'telegram_bot_token': token.isEmpty ? null : token,
+      'telegram_enabled': enabled,
     });
 
     if (enabled) {
@@ -586,17 +748,7 @@ Future<void> _savePrompt() async {
     final attachmentPrompt =
         (web.document.getElementById('cfgAttachmentPrompt') as web.HTMLTextAreaElement).value.trim();
 
-    final current = await tauri.invoke('load_config') as Map? ?? {};
-    await tauri.invoke('save_config', {
-      'cfg': {
-        'ollama_model': current['ollama_model'],
-        'telegram_bot_token': current['telegram_bot_token'],
-        'telegram_chat_id': current['telegram_chat_id'],
-        'telegram_enabled': current['telegram_enabled'] ?? false,
-        'context_size': (current['context_size'] as num?)?.toInt() ?? 4096,
-        'attachment_prompt': attachmentPrompt.isEmpty ? null : attachmentPrompt,
-      },
-    });
+    await _patchConfig({'attachment_prompt': attachmentPrompt.isEmpty ? null : attachmentPrompt});
     status.textContent = '저장됨';
   } catch (e) {
     status.textContent = '오류: $e';
@@ -609,6 +761,9 @@ Future<void> _loadSettingsPanel() async {
   (web.document.getElementById('cfgContextSize') as web.HTMLInputElement).value =
       contextSize.toString();
   web.document.getElementById('cfgContextSizeValue')!.textContent = '$contextSize';
+  (web.document.getElementById('cfgDartKey') as web.HTMLInputElement).value =
+      (cfg?['opendart_api_key'] as String?) ?? '';
+  await _refreshDartStatus();
 }
 
 Future<void> _saveGeneralSettings() async {
@@ -617,18 +772,40 @@ Future<void> _saveGeneralSettings() async {
   try {
     final contextSize =
         int.tryParse((web.document.getElementById('cfgContextSize') as web.HTMLInputElement).value) ?? 4096;
-    final current = await tauri.invoke('load_config') as Map? ?? {};
-    await tauri.invoke('save_config', {
-      'cfg': {
-        'ollama_model': current['ollama_model'],
-        'telegram_bot_token': current['telegram_bot_token'],
-        'telegram_chat_id': current['telegram_chat_id'],
-        'telegram_enabled': current['telegram_enabled'] ?? false,
-        'context_size': contextSize,
-        'attachment_prompt': current['attachment_prompt'],
-      },
-    });
+    await _patchConfig({'context_size': contextSize});
     status.textContent = '저장됨';
+  } catch (e) {
+    status.textContent = '오류: $e';
+  }
+}
+
+// OpenDART: the corp-code directory gives every company one stable key, so
+// pages about the same firm stop scattering across spelling variants (D-05c).
+
+Future<void> _refreshDartStatus() async {
+  final count = await tauri.invoke('dart_corp_count') as num? ?? 0;
+  web.document.getElementById('dartStatus')!.textContent =
+      count == 0 ? '기업 목록 없음 -- 내려받기 필요' : '기업 $count곳 보관 중';
+}
+
+Future<void> _saveDartKey() async {
+  final status = web.document.getElementById('dartStatus')!;
+  status.textContent = '저장 중...';
+  try {
+    final key = (web.document.getElementById('cfgDartKey') as web.HTMLInputElement).value.trim();
+    await _patchConfig({'opendart_api_key': key.isEmpty ? null : key});
+    status.textContent = '키 저장됨';
+  } catch (e) {
+    status.textContent = '오류: $e';
+  }
+}
+
+Future<void> _refreshDartCorpCodes() async {
+  final status = web.document.getElementById('dartStatus')!;
+  status.textContent = '내려받는 중... (약 10만 곳, 시간이 걸립니다)';
+  try {
+    final count = await tauri.invoke('dart_refresh_corp_codes') as num?;
+    status.textContent = '완료 -- 기업 $count곳 보관';
   } catch (e) {
     status.textContent = '오류: $e';
   }
@@ -755,9 +932,88 @@ Future<void> _deleteMemoryEntry(String id) async {
 
 String? _wikiEditingId;
 
+/// Resolves the scope box to a `corp_code`, reporting what it found.
+///
+/// D-05c: the backend filters on `corp_code`, never on the typed name --
+/// `삼성전자` and `삼성전자(주)` have to land on one scope or the filter
+/// hides pages while looking like it works. An unresolved name falls back to
+/// whole-wiki rather than an empty result, and says so.
+Future<String?> _resolveWikiScope() async {
+  final status = web.document.getElementById('wikiScopeStatus')!;
+  final name = (web.document.getElementById('wikiScope') as web.HTMLInputElement).value.trim();
+  if (name.isEmpty) {
+    status.textContent = '';
+    return null;
+  }
+  final hit = await tauri.invoke('dart_lookup_company', {'name': name}) as Map?;
+  if (hit == null) {
+    status.textContent = '"$name" -- DART 목록에 없어 전체를 대상으로 합니다';
+    return null;
+  }
+  status.textContent = '${hit['display_name']} (${hit['corp_code']}) 범위';
+  return hit['corp_code'] as String?;
+}
+
 Future<void> _loadWikiPanel() async {
   final entries = await tauri.invoke('wiki_list') as List? ?? [];
   _renderWikiList(entries);
+  final drafts = await tauri.invoke('wiki_draft_list') as List? ?? [];
+  _renderWikiDraftList(drafts);
+}
+
+// Unpromoted query answers (wiki/draft.json). Deliberately a separate list
+// from the wiki proper: these are model output that nothing has checked yet,
+// and until someone promotes one it is never fed back as context (D-03).
+void _renderWikiDraftList(List entries) {
+  final list = web.document.getElementById('wikiDraftList')!;
+  if (entries.isEmpty) {
+    list.textContent = '검토 대기 중인 답변 없음';
+    return;
+  }
+  final sorted = entries.cast<Map>().toList()
+    ..sort((a, b) => (b['created_at'] as String? ?? '').compareTo(a['created_at'] as String? ?? ''));
+
+  list.innerHTML = sorted.map((e) {
+    final id = e['id'] as String;
+    final title = _escapeHtml(e['canonical_title'] as String? ?? e['title'] as String? ?? '');
+    final summary = _escapeHtml(e['summary'] as String? ?? '');
+    return '''
+      <div class="entryItem" data-id="$id">
+        <div class="entryText"><strong>$title</strong> -- $summary</div>
+        <div class="entryActions">
+          <button type="button" class="draftPromote" data-id="$id">위키에 반영</button>
+          <button type="button" class="draftDiscard" data-id="$id">버리기</button>
+        </div>
+      </div>
+    ''';
+  }).join().toJS;
+
+  _forEachElement(list.querySelectorAll('.draftPromote'), (btn) {
+    final id = btn.getAttribute('data-id')!;
+    void onPromote(web.Event e) => unawaited(_promoteWikiDraft(id));
+    btn.addEventListener('click', onPromote.toJS);
+  });
+  _forEachElement(list.querySelectorAll('.draftDiscard'), (btn) {
+    final id = btn.getAttribute('data-id')!;
+    void onDiscard(web.Event e) => unawaited(_discardWikiDraft(id));
+    btn.addEventListener('click', onDiscard.toJS);
+  });
+}
+
+Future<void> _promoteWikiDraft(String id) async {
+  final status = web.document.getElementById('wikiStatus')!;
+  try {
+    await tauri.invoke('wiki_promote', {'id': id});
+    status.textContent = '위키에 반영됨';
+    await _loadWikiPanel();
+  } catch (e) {
+    status.textContent = '오류: $e';
+  }
+}
+
+Future<void> _discardWikiDraft(String id) async {
+  await tauri.invoke('wiki_discard_draft', {'id': id});
+  await _loadWikiPanel();
 }
 
 void _renderWikiList(List entries) {
@@ -771,7 +1027,9 @@ void _renderWikiList(List entries) {
 
   list.innerHTML = sorted.map((e) {
     final id = e['id'] as String;
-    final title = _escapeHtml(e['title'] as String? ?? '');
+    // canonical_title carries the disambiguating suffix when another page
+    // shares this title (D-08 ④); `title` stays the bare editable form.
+    final title = _escapeHtml(e['canonical_title'] as String? ?? e['title'] as String? ?? '');
     final summary = _escapeHtml(e['summary'] as String? ?? '');
     final tags = (e['tags'] as List?)?.cast<String>().join(', ') ?? '';
     return '''
@@ -806,6 +1064,12 @@ void _startEditWiki(Map entry) {
   (web.document.getElementById('wikiBody') as web.HTMLTextAreaElement).value = entry['body'] as String? ?? '';
   (web.document.getElementById('wikiTags') as web.HTMLInputElement).value =
       (entry['tags'] as List?)?.cast<String>().join(', ') ?? '';
+  (web.document.getElementById('wikiCompany') as web.HTMLInputElement).value =
+      ((entry['company'] as Map?)?['display_name'] as String?) ?? '';
+  (web.document.getElementById('wikiPeriod') as web.HTMLInputElement).value =
+      (entry['period'] as String?) ?? '';
+  (web.document.getElementById('wikiBodyRequired') as web.HTMLInputElement).checked =
+      (entry['body_required'] as bool?) ?? false;
   (web.document.getElementById('wikiSave') as web.HTMLButtonElement).textContent = '수정 저장';
   web.document.getElementById('wikiCancelEdit')!.classList.remove('hidden');
 }
@@ -816,6 +1080,9 @@ void _resetWikiForm() {
   (web.document.getElementById('wikiSummary') as web.HTMLInputElement).value = '';
   (web.document.getElementById('wikiBody') as web.HTMLTextAreaElement).value = '';
   (web.document.getElementById('wikiTags') as web.HTMLInputElement).value = '';
+  (web.document.getElementById('wikiCompany') as web.HTMLInputElement).value = '';
+  (web.document.getElementById('wikiPeriod') as web.HTMLInputElement).value = '';
+  (web.document.getElementById('wikiBodyRequired') as web.HTMLInputElement).checked = false;
   (web.document.getElementById('wikiSave') as web.HTMLButtonElement).textContent = '저장';
   web.document.getElementById('wikiCancelEdit')!.classList.add('hidden');
 }
@@ -846,17 +1113,35 @@ Future<void> _saveWikiEntry() async {
         'body': body,
         'tags': tags,
       });
-    } else {
-      await tauri.invoke('wiki_save', {
-        'title': title,
-        'summary': summary,
-        'body': body,
-        'tags': tags,
-        'relatedIds': <String>[],
-      });
+      _resetWikiForm();
+      status.textContent = '저장됨';
+      await _loadWikiPanel();
+      return;
     }
+
+    final company =
+        (web.document.getElementById('wikiCompany') as web.HTMLInputElement).value.trim();
+    final period = (web.document.getElementById('wikiPeriod') as web.HTMLInputElement).value.trim();
+    final saved = await tauri.invoke('wiki_save', {
+      'title': title,
+      'summary': summary,
+      'body': body,
+      'tags': tags,
+      'company': company.isEmpty ? null : company,
+      'period': period.isEmpty ? null : period,
+      'bodyRequired':
+          (web.document.getElementById('wikiBodyRequired') as web.HTMLInputElement).checked,
+    }) as Map?;
+
     _resetWikiForm();
-    status.textContent = '저장됨';
+    // A company the DART directory doesn't know is stored as no scope at all
+    // rather than as typed text (D-05c). Saying so matters: otherwise the
+    // page looks filed under that company and quietly never appears in its
+    // scope.
+    final resolved = saved?['company'] as Map?;
+    status.textContent = company.isNotEmpty && resolved == null
+        ? '저장됨 -- 다만 "$company"를 DART 목록에서 찾지 못해 기업 없이 저장했습니다'
+        : '저장됨';
     await _loadWikiPanel();
   } catch (e) {
     status.textContent = '오류: $e';
