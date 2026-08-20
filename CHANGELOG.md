@@ -2,6 +2,28 @@
 
 See [BUGFIXES.md](BUGFIXES.md) for a detailed, symptom → root cause → fix log of every bug found during development.
 
+## [0.1.6] - 2026-08-03
+
+### Changed
+- **One input path: the prompt.** The wiki panel's separate boxes (paste-source, company scope, ask-a-question) and its save form (title / summary / tags / body / company / period / "contains figures") are gone. You type — or attach a file — and the chairman decides whether it is a question for the wiki, material to file into it, or ordinary chat (`chairman::decide_intent`, design §2.4).
+
+  Roughly half those fields existed because the agents that should fill them do not exist yet: Taxonomy assigns the company (§4.1.2), preprocessing parses the period, and O-22 still hasn't settled who marks a page as carrying figures. Asking the user instead was a shortcut taken while closing D-04/D-05 — it worked, but it left an unfinished mechanism sitting on the product surface, where "LLM wiki" and "type your own metadata" contradict each other in plain sight.
+
+  Company scope now comes out of the sentence (`match_known_company`, §8.2.3) rather than a field that stayed set between questions.
+- **File attachments in web chat** (📎), sharing the Telegram bridge's extraction rules via a new `attachment` module — images to the model as images, `.xlsx` through `calamine`, everything else as text, capped at 8000 chars with the truncation stated rather than silent.
+
+### Fixed
+- **Wiki answers had lost the conversation.** Routing a message to the wiki skipped `memory::build_messages` entirely, so "이 정보에 대한 날짜는?" reached the model with no idea what "이 정보" referred to — and the turn was never recorded, leaving a hole for later messages too. Wiki paths now carry the same remembered turns as ordinary chat, and the context budget subtracts what the history occupies so the two cannot overflow the window together (that overflow would truncate the tail silently — the D-04 failure one layer out). A regression introduced by this release's own entry-point merge: the wiki query used to be its own button, where standing outside the conversation made sense.
+- `Cargo.toml`'s description no longer claims "offline AI assistant" — it is local-first, with on-demand OpenDART lookups (O-25).
+
+### Removed
+- `wiki_save`, `wiki_ingest`, `wiki_query` commands and `wiki::update`, along with the wiki list's 편집 button. Pages are created by routing a prompt and reviewed in the draft queue; a page that came out wrong is discarded there or deleted, not hand-patched. **Trade-off**: partial edits are no longer possible — a one-line mistake means regenerating the page. Recorded in the v0.1.6 design note as the first thing to revisit if it proves annoying.
+
+### Note
+`company`, `period` and `body_required` now have no writer until preprocessing and Taxonomy land — the scope filter (D-05a) and the context budget (D-04) are implemented but will not have values to act on until then. That is the cost of removing the stopgap rather than shipping it.
+
+See `구성도/v0.1.6_적용/00_v0.1.6_설계서.md`.
+
 ## [0.1.5.2] - 2026-08-03
 
 Versioning note: the design documents run to **v0.1.5.2** (D1 → D2 → D3 →

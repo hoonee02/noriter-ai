@@ -1,5 +1,6 @@
 use crate::config;
 use crate::memory::MemoryState;
+use crate::attachment::compose_attachment_text;
 use base64::Engine;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
@@ -8,9 +9,6 @@ use teloxide::{net::Download, prelude::*, types::Message};
 // Telegram's hard limit on a single sendMessage's text is 4096 chars; stay
 // a little under it the same way the old Dart bridge did.
 const MAX_REPLY_CHARS: usize = 3900;
-// Same truncation the old Dart bridge applied to document text before
-// embedding it in the prompt, to avoid blowing a small model's context.
-const MAX_ATTACHMENT_CHARS: usize = 8000;
 // The echoed prompt preview above the reply is capped short and separate
 // from MAX_ATTACHMENT_CHARS: an attachment's full extracted text can be
 // thousands of chars (goes to Ollama as the prompt, never sent back to
@@ -255,46 +253,3 @@ async fn download_file(bot: &Bot, file_id: &str) -> anyhow::Result<Vec<u8>> {
     Ok(buf)
 }
 
-/// Converts a downloaded document into the same "[Attached file: ...]" text
-/// block the old Dart bridge used -- .xlsx is parsed into a plain-text
-/// table (one section per sheet, pipe-separated cells) via `calamine`,
-/// everything else is decoded as UTF-8 (lossy). Truncated at
-/// `MAX_ATTACHMENT_CHARS` to avoid blowing a small model's context window.
-fn compose_attachment_text(file_name: &str, bytes: &[u8]) -> String {
-    let ext = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
-    let content = if ext == "xlsx" {
-        xlsx_bytes_to_text(bytes).unwrap_or_else(|e| format!("(failed to parse spreadsheet: {e})"))
-    } else {
-        String::from_utf8_lossy(bytes).to_string()
-    };
-
-    let truncated = content.chars().count() > MAX_ATTACHMENT_CHARS;
-    let body: String = content.chars().take(MAX_ATTACHMENT_CHARS).collect();
-    let notice = if truncated {
-        format!("\n\n(File truncated to {MAX_ATTACHMENT_CHARS} characters)")
-    } else {
-        String::new()
-    };
-    format!("[Attached file: {file_name}]\n```\n{body}\n```{notice}")
-}
-
-fn xlsx_bytes_to_text(bytes: &[u8]) -> anyhow::Result<String> {
-    use calamine::{Reader, Xlsx};
-    let cursor = std::io::Cursor::new(bytes);
-    let mut workbook: Xlsx<_> = calamine::open_workbook_from_rs(cursor)?;
-
-    let mut out = String::new();
-    for sheet_name in workbook.sheet_names().to_vec() {
-        let Ok(range) = workbook.worksheet_range(&sheet_name) else {
-            continue;
-        };
-        out.push_str(&format!("--- {sheet_name} ---\n"));
-        for row in range.rows() {
-            let cells: Vec<String> = row.iter().map(|c| c.to_string()).collect();
-            out.push_str(&cells.join(" | "));
-            out.push('\n');
-        }
-        out.push('\n');
-    }
-    Ok(out)
-}

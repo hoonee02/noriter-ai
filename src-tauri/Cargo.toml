@@ -1,7 +1,7 @@
 [package]
 name = "noriter-ai"
-version = "0.1.5"
-description = "Noriter AI - offline AI assistant with Telegram bridge"
+version = "0.1.6"
+description = "Noriter AI - local-first AI assistant with Telegram bridge (offline except on-demand OpenDART lookups)"
 edition = "2021"
 
 [build-dependencies]

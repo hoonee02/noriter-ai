@@ -540,34 +540,9 @@ pub fn save(state: &WikiState, page: NewPage) -> WikiEntry {
     entry
 }
 
-pub fn update(
-    state: &WikiState,
-    id: &str,
-    title: Option<String>,
-    summary: Option<String>,
-    body: Option<String>,
-    tags: Option<Vec<String>>,
-) -> Result<(), String> {
-    let mut entries = state.0.lock().unwrap();
-    let Some(entry) = entries.iter_mut().find(|e| e.id == id) else {
-        return Err("wiki entry not found".into());
-    };
-    if let Some(v) = title {
-        entry.title = v;
-    }
-    if let Some(v) = summary {
-        entry.summary = v;
-    }
-    if let Some(v) = body {
-        entry.body = v;
-    }
-    if let Some(v) = tags {
-        entry.tags = v;
-    }
-    entry.updated_at = now_iso();
-    save_to(index_path(), &entries);
-    Ok(())
-}
+// `update` was removed in 0.1.6 along with the manual edit form. Pages are
+// written by ingest and reviewed in the draft queue; a page that came out
+// wrong is discarded there or deleted, not hand-patched field by field.
 
 pub fn delete(state: &WikiState, id: &str) {
     let mut entries = state.0.lock().unwrap();
@@ -777,6 +752,7 @@ pub async fn query(
     num_ctx: u32,
     question: &str,
     scope: Option<&str>,
+    history: &[ChatMessage],
 ) -> Result<String, String> {
     let entries = list_scoped(wiki, scope);
 
@@ -787,7 +763,11 @@ pub async fn query(
     // exists.
     let hint = preflight::match_known_company(&entries, question);
     let index = preflight::run_preflight(&entries, question, hint);
-    let budget = preflight::ContextBudget::from_num_ctx(num_ctx);
+    // The remembered turns share the window with the retrieved pages, so the
+    // wiki's share shrinks by what the history already occupies -- otherwise
+    // both size against the full window and the tail is silently cut.
+    let history_chars: usize = history.iter().map(|m| m.content.chars().count()).sum();
+    let budget = preflight::ContextBudget::from_num_ctx(num_ctx).reserving(history_chars);
     let routed = preflight::allocate_budget(&index, &budget);
     let context = preflight::render_context(&entries, &routed);
     let excluded = preflight::excluded_notice(&entries, &routed);
@@ -797,7 +777,8 @@ pub async fn query(
     } else {
         format!("다음은 위키에 저장된 문서들입니다.\n\n{context}\n\n위 내용을 참고해서 다음 질문에 답해줘: {question}")
     };
-    let messages = vec![ChatMessage::text("user", prompt)];
+    let mut messages = history.to_vec();
+    messages.push(ChatMessage::text("user", prompt));
     let preview = format!("(위키 질의: {question})");
     let result = queue::call_llm(app, "wiki-query", preview, model, &messages, num_ctx).await?;
 

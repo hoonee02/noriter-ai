@@ -41,3 +41,8 @@ html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
 .msgMeta { margin-top: 2px; font-size: 0.72em; opacity: 0.65; }
 .composer { display: flex; gap: 8px; padding: 12px; border-top: 1px solid #e2e8f0; }
 .composer input { flex: 1; padding: 8px; }
+.attachBar { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 12px; border-top: 1px solid #e2e8f0; }
+.attachBar.hidden { display: none; }
+.attachChip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 12px; background: #e2e8f0; font-size: 0.8em; }
+.attachChip button { border: none; background: none; cursor: pointer; padding: 0; font-size: 1em; line-height: 1; }
+.composer #attachBtn { padding: 8px 10px; }

@@ -119,8 +119,9 @@ void main() {
 
       <div id="wikiPanel" class="panel hidden">
         <p class="panelDesc">
-          대화 중 나온 내용을 문서로 정리해서 보관합니다 (자동 생성 안 됨 -- 직접 저장해야
-          쌓입니다). 나중에 찾아볼 수 있는 "찾아보는 자료"입니다.
+          아래 대화창에 그냥 말하면 됩니다 -- <strong>질문하면 위키에서 찾아 답하고,
+          자료를 주면 정리해서 보관합니다.</strong> 무엇을 할지는 모델이 판단하므로
+          따로 고를 필요가 없습니다. 기업 이름을 문장에 넣으면 그 기업 범위로 좁혀 답합니다.
         </p>
         <div id="wikiList" class="entryList"></div>
 
@@ -133,70 +134,13 @@ void main() {
         </div>
 
         <div class="wikiTool">
-          <label>📥 자료 통합 (Ingest) -- 원문을 붙여넣으면 모델이 제목/요약/태그/본문을 알아서 정리해 저장합니다
-            <textarea id="wikiIngestText" rows="4" placeholder="여기에 원문을 붙여넣으세요"></textarea>
-          </label>
-          <div class="panelActions">
-            <button id="wikiIngestBtn" type="button">통합 실행</button>
-            <span id="wikiIngestStatus"></span>
-          </div>
-        </div>
-
-        <div class="wikiTool">
-          <label>🏢 기업 스코프 -- 비워두면 위키 전체가 대상입니다. 지정하면 그 기업 문서 + 기업 무관 문서만 봅니다
-            <input id="wikiScope" type="text" placeholder="예: 삼성전자 (비워두면 전체)" />
-          </label>
-          <div class="panelActions">
-            <span id="wikiScopeStatus"></span>
-          </div>
-        </div>
-
-        <div class="wikiTool">
-          <label>❓ 위키에 질문 (Query) -- 답변은 위 "검토 대기"에 쌓입니다 (확인 후 반영)
-            <input id="wikiQueryText" type="text" placeholder="예: 저번에 정리한 엑셀 자료 요약해줘" />
-          </label>
-          <div class="panelActions">
-            <button id="wikiQueryBtn" type="button">질문하기</button>
-            <span id="wikiQueryStatus"></span>
-          </div>
-          <div id="wikiQueryAnswer" class="wikiAnswer"></div>
-        </div>
-
-        <div class="wikiTool">
           <div class="panelActions">
             <button id="wikiLintBtn" type="button">🔍 위키 점검 (Lint)</button>
             <span id="wikiLintStatus"></span>
           </div>
           <div id="wikiLintReport" class="wikiAnswer"></div>
         </div>
-
-        <label>제목
-          <input id="wikiTitle" type="text" placeholder="예: 예제모음.xlsx 데이터 구조" />
-        </label>
-        <label>요약
-          <input id="wikiSummary" type="text" placeholder="한 줄 요약" />
-        </label>
-        <label>본문
-          <textarea id="wikiBody" rows="4" placeholder="마크다운으로 자유롭게"></textarea>
-        </label>
-        <label>태그 (쉼표로 구분)
-          <input id="wikiTags" type="text" placeholder="excel, telegram" />
-        </label>
-        <label>기업 (선택) -- DART 기업 목록에서 찾은 경우에만 기록됩니다
-          <input id="wikiCompany" type="text" placeholder="예: 삼성전자" />
-        </label>
-        <label>회계 기간 (선택)
-          <input id="wikiPeriod" type="text" placeholder="예: 2025-FY" />
-        </label>
-        <label class="checkbox">
-          <input id="wikiBodyRequired" type="checkbox" />
-          본문에 재무 수치가 있음 -- 컨텍스트가 모자라도 요약으로 대체하지 않고, 대신 제외 사실을 답변에 밝힙니다
-        </label>
-        <div class="panelActions">
-          <button id="wikiSave" type="button">저장</button>
-          <button id="wikiCancelEdit" type="button" class="hidden">취소</button>
-          <span id="wikiStatus"></span>
-        </div>
+        <span id="wikiStatus"></span>
       </div>
 
       <div id="settingsPanel" class="panel hidden">
@@ -222,8 +166,11 @@ void main() {
       </div>
 
       <div id="log" class="log"></div>
+      <div id="attachBar" class="attachBar hidden"></div>
       <form id="form" class="composer">
-        <input id="input" type="text" placeholder="메시지를 입력하세요" autocomplete="off" />
+        <input id="attachInput" type="file" multiple class="hidden" />
+        <button id="attachBtn" type="button" title="파일 첨부">📎</button>
+        <input id="input" type="text" placeholder="메시지를 입력하세요 (자료를 주면 위키에 정리합니다)" autocomplete="off" />
         <button type="submit">보내기</button>
       </form>
     </div>
@@ -436,21 +383,19 @@ void _wire() {
   void onMemoryCancel(web.Event e) => _resetMemoryForm();
   memoryCancelBtn.addEventListener('click', onMemoryCancel.toJS);
 
-  final wikiSaveBtn = web.document.getElementById('wikiSave') as web.HTMLButtonElement;
-  void onWikiSave(web.Event e) => unawaited(_saveWikiEntry());
-  wikiSaveBtn.addEventListener('click', onWikiSave.toJS);
 
-  final wikiCancelBtn = web.document.getElementById('wikiCancelEdit') as web.HTMLButtonElement;
-  void onWikiCancel(web.Event e) => _resetWikiForm();
-  wikiCancelBtn.addEventListener('click', onWikiCancel.toJS);
+  final attachBtn = web.document.getElementById('attachBtn') as web.HTMLButtonElement;
+  final attachInput = web.document.getElementById('attachInput') as web.HTMLInputElement;
+  void onAttachClick(web.Event e) => attachInput.click();
+  attachBtn.addEventListener('click', onAttachClick.toJS);
+  void onAttachChange(web.Event e) {
+    unawaited(_stageAttachments(attachInput.files).then((_) {
+      // Reset so picking the same file twice in a row still fires `change`.
+      attachInput.value = '';
+    }));
+  }
 
-  final wikiIngestBtn = web.document.getElementById('wikiIngestBtn') as web.HTMLButtonElement;
-  void onWikiIngest(web.Event e) => unawaited(_runWikiIngest());
-  wikiIngestBtn.addEventListener('click', onWikiIngest.toJS);
-
-  final wikiQueryBtn = web.document.getElementById('wikiQueryBtn') as web.HTMLButtonElement;
-  void onWikiQuery(web.Event e) => unawaited(_runWikiQuery());
-  wikiQueryBtn.addEventListener('click', onWikiQuery.toJS);
+  attachInput.addEventListener('change', onAttachChange.toJS);
 
   final wikiLintBtn = web.document.getElementById('wikiLintBtn') as web.HTMLButtonElement;
   void onWikiLint(web.Event e) => unawaited(_runWikiLint());
@@ -465,57 +410,7 @@ Future<Map<String, dynamic>> _currentModelAndCtx() async {
   };
 }
 
-Future<void> _runWikiIngest() async {
-  final status = web.document.getElementById('wikiIngestStatus')!;
-  final textarea = web.document.getElementById('wikiIngestText') as web.HTMLTextAreaElement;
-  final sourceText = textarea.value.trim();
-  if (sourceText.isEmpty) {
-    status.textContent = '통합할 자료를 입력하세요';
-    return;
-  }
-  status.textContent = '통합 중... (형식이 어긋나면 최대 3회까지 다시 시도합니다)';
-  try {
-    final mc = await _currentModelAndCtx();
-    await tauri.invoke('wiki_ingest', {
-      'model': mc['model'],
-      'numCtx': mc['numCtx'],
-      'sourceText': sourceText,
-      'sourceLabel': '수동 입력',
-    });
-    textarea.value = '';
-    status.textContent = '통합 완료 -- 새 문서가 아래 목록에 추가됨';
-    await _loadWikiPanel();
-  } catch (e) {
-    status.textContent = '오류: $e';
-  }
-}
 
-Future<void> _runWikiQuery() async {
-  final status = web.document.getElementById('wikiQueryStatus')!;
-  final answerBox = web.document.getElementById('wikiQueryAnswer')!;
-  final input = web.document.getElementById('wikiQueryText') as web.HTMLInputElement;
-  final question = input.value.trim();
-  if (question.isEmpty) {
-    status.textContent = '질문을 입력하세요';
-    return;
-  }
-  status.textContent = '검색 중...';
-  answerBox.textContent = '';
-  try {
-    final mc = await _currentModelAndCtx();
-    final answer = await tauri.invoke('wiki_query', {
-      'model': mc['model'],
-      'numCtx': mc['numCtx'],
-      'question': question,
-      'scope': await _resolveWikiScope(),
-    }) as String?;
-    answerBox.textContent = answer ?? '(응답 없음)';
-    status.textContent = '완료 -- 답변이 검토 대기에 추가됨';
-    await _loadWikiPanel();
-  } catch (e) {
-    status.textContent = '오류: $e';
-  }
-}
 
 Future<void> _runWikiLint() async {
   final status = web.document.getElementById('wikiLintStatus')!;
@@ -527,7 +422,6 @@ Future<void> _runWikiLint() async {
     final report = await tauri.invoke('wiki_lint', {
       'model': mc['model'],
       'numCtx': mc['numCtx'],
-      'scope': await _resolveWikiScope(),
     }) as String?;
     reportBox.textContent = report ?? '(결과 없음)';
     status.textContent = '완료';
@@ -845,7 +739,6 @@ void _renderMemoryList(List entries) {
       <div class="entryItem" data-id="$id">
         <div class="entryText">$pin[$category] $content</div>
         <div class="entryActions">
-          <button type="button" class="entryEdit" data-id="$id">편집</button>
           <button type="button" class="entryDelete" data-id="$id">삭제</button>
         </div>
       </div>
@@ -930,29 +823,12 @@ Future<void> _deleteMemoryEntry(String id) async {
 // user explicitly saves something here.
 // ---------------------------------------------------------------------
 
-String? _wikiEditingId;
-
 /// Resolves the scope box to a `corp_code`, reporting what it found.
 ///
 /// D-05c: the backend filters on `corp_code`, never on the typed name --
 /// `삼성전자` and `삼성전자(주)` have to land on one scope or the filter
 /// hides pages while looking like it works. An unresolved name falls back to
 /// whole-wiki rather than an empty result, and says so.
-Future<String?> _resolveWikiScope() async {
-  final status = web.document.getElementById('wikiScopeStatus')!;
-  final name = (web.document.getElementById('wikiScope') as web.HTMLInputElement).value.trim();
-  if (name.isEmpty) {
-    status.textContent = '';
-    return null;
-  }
-  final hit = await tauri.invoke('dart_lookup_company', {'name': name}) as Map?;
-  if (hit == null) {
-    status.textContent = '"$name" -- DART 목록에 없어 전체를 대상으로 합니다';
-    return null;
-  }
-  status.textContent = '${hit['display_name']} (${hit['corp_code']}) 범위';
-  return hit['corp_code'] as String?;
-}
 
 Future<void> _loadWikiPanel() async {
   final entries = await tauri.invoke('wiki_list') as List? ?? [];
@@ -1036,19 +912,12 @@ void _renderWikiList(List entries) {
       <div class="entryItem" data-id="$id">
         <div class="entryText"><strong>$title</strong> -- $summary${tags.isEmpty ? '' : ' [$tags]'}</div>
         <div class="entryActions">
-          <button type="button" class="entryEdit" data-id="$id">편집</button>
           <button type="button" class="entryDelete" data-id="$id">삭제</button>
         </div>
       </div>
     ''';
   }).join().toJS;
 
-  _forEachElement(list.querySelectorAll('.entryEdit'), (btn) {
-    final id = btn.getAttribute('data-id')!;
-    final entry = sorted.firstWhere((e) => e['id'] == id);
-    void onEdit(web.Event e) => _startEditWiki(entry);
-    btn.addEventListener('click', onEdit.toJS);
-  });
   _forEachElement(list.querySelectorAll('.entryDelete'), (btn) {
     final id = btn.getAttribute('data-id')!;
     void onDelete(web.Event e) => unawaited(_deleteWikiEntry(id));
@@ -1056,97 +925,8 @@ void _renderWikiList(List entries) {
   });
 }
 
-void _startEditWiki(Map entry) {
-  _wikiEditingId = entry['id'] as String;
-  (web.document.getElementById('wikiTitle') as web.HTMLInputElement).value = entry['title'] as String? ?? '';
-  (web.document.getElementById('wikiSummary') as web.HTMLInputElement).value =
-      entry['summary'] as String? ?? '';
-  (web.document.getElementById('wikiBody') as web.HTMLTextAreaElement).value = entry['body'] as String? ?? '';
-  (web.document.getElementById('wikiTags') as web.HTMLInputElement).value =
-      (entry['tags'] as List?)?.cast<String>().join(', ') ?? '';
-  (web.document.getElementById('wikiCompany') as web.HTMLInputElement).value =
-      ((entry['company'] as Map?)?['display_name'] as String?) ?? '';
-  (web.document.getElementById('wikiPeriod') as web.HTMLInputElement).value =
-      (entry['period'] as String?) ?? '';
-  (web.document.getElementById('wikiBodyRequired') as web.HTMLInputElement).checked =
-      (entry['body_required'] as bool?) ?? false;
-  (web.document.getElementById('wikiSave') as web.HTMLButtonElement).textContent = '수정 저장';
-  web.document.getElementById('wikiCancelEdit')!.classList.remove('hidden');
-}
 
-void _resetWikiForm() {
-  _wikiEditingId = null;
-  (web.document.getElementById('wikiTitle') as web.HTMLInputElement).value = '';
-  (web.document.getElementById('wikiSummary') as web.HTMLInputElement).value = '';
-  (web.document.getElementById('wikiBody') as web.HTMLTextAreaElement).value = '';
-  (web.document.getElementById('wikiTags') as web.HTMLInputElement).value = '';
-  (web.document.getElementById('wikiCompany') as web.HTMLInputElement).value = '';
-  (web.document.getElementById('wikiPeriod') as web.HTMLInputElement).value = '';
-  (web.document.getElementById('wikiBodyRequired') as web.HTMLInputElement).checked = false;
-  (web.document.getElementById('wikiSave') as web.HTMLButtonElement).textContent = '저장';
-  web.document.getElementById('wikiCancelEdit')!.classList.add('hidden');
-}
 
-Future<void> _saveWikiEntry() async {
-  final status = web.document.getElementById('wikiStatus')!;
-  status.textContent = '저장 중...';
-  try {
-    final title = (web.document.getElementById('wikiTitle') as web.HTMLInputElement).value.trim();
-    final summary = (web.document.getElementById('wikiSummary') as web.HTMLInputElement).value.trim();
-    final body = (web.document.getElementById('wikiBody') as web.HTMLTextAreaElement).value.trim();
-    final tags = (web.document.getElementById('wikiTags') as web.HTMLInputElement)
-        .value
-        .split(',')
-        .map((t) => t.trim())
-        .where((t) => t.isNotEmpty)
-        .toList();
-    if (title.isEmpty) {
-      status.textContent = '제목을 입력하세요';
-      return;
-    }
-
-    if (_wikiEditingId != null) {
-      await tauri.invoke('wiki_update', {
-        'id': _wikiEditingId,
-        'title': title,
-        'summary': summary,
-        'body': body,
-        'tags': tags,
-      });
-      _resetWikiForm();
-      status.textContent = '저장됨';
-      await _loadWikiPanel();
-      return;
-    }
-
-    final company =
-        (web.document.getElementById('wikiCompany') as web.HTMLInputElement).value.trim();
-    final period = (web.document.getElementById('wikiPeriod') as web.HTMLInputElement).value.trim();
-    final saved = await tauri.invoke('wiki_save', {
-      'title': title,
-      'summary': summary,
-      'body': body,
-      'tags': tags,
-      'company': company.isEmpty ? null : company,
-      'period': period.isEmpty ? null : period,
-      'bodyRequired':
-          (web.document.getElementById('wikiBodyRequired') as web.HTMLInputElement).checked,
-    }) as Map?;
-
-    _resetWikiForm();
-    // A company the DART directory doesn't know is stored as no scope at all
-    // rather than as typed text (D-05c). Saying so matters: otherwise the
-    // page looks filed under that company and quietly never appears in its
-    // scope.
-    final resolved = saved?['company'] as Map?;
-    status.textContent = company.isNotEmpty && resolved == null
-        ? '저장됨 -- 다만 "$company"를 DART 목록에서 찾지 못해 기업 없이 저장했습니다'
-        : '저장됨';
-    await _loadWikiPanel();
-  } catch (e) {
-    status.textContent = '오류: $e';
-  }
-}
 
 Future<void> _deleteWikiEntry(String id) async {
   await tauri.invoke('wiki_delete', {'id': id});
@@ -1157,6 +937,12 @@ Future<void> _sendToOllama(String text) async {
   final placeholder = await _appendMessage('assistant', '...');
   final cfg = await tauri.invoke('load_config') as Map?;
 
+  // Taken and cleared up front: the send is async, and leaving them attached
+  // would silently resend the same files with the next message.
+  final files = List<Map<String, String>>.from(_pendingAttachments);
+  _pendingAttachments.clear();
+  _renderAttachBar();
+
   try {
     // Ollama request preprocessing (default-model fallback, context-size
     // clamping) happens in the worker -- see worker/logic.dart.
@@ -1164,17 +950,96 @@ Future<void> _sendToOllama(String text) async {
       'model': cfg?['ollama_model'],
       'prompt': text,
       'numCtx': (cfg?['context_size'] as num?)?.toInt() ?? 4096,
-    });
+    }) as Map;
 
-    final result = await tauri.invoke('ollama_chat', request) as Map?;
+    final result = await tauri.invoke('ollama_chat', {
+      ...request,
+      if (files.isNotEmpty) 'files': files,
+    }) as Map?;
 
     final reply = (result?['content'] as String?) ?? '(no response)';
+    // The chairman routes the message (chat / wiki query / wiki ingest), so
+    // say which path ran -- otherwise a reply that quietly went to the wiki
+    // instead of answering looks like the model ignored the question.
+    final routed = result?['routed_as'] as String?;
+    final note = switch (routed) {
+      'wiki-query' => '\n\n_(📚 위키에서 찾아 답했습니다 -- 답변은 검토 대기에 쌓입니다)_',
+      'wiki-ingest' => '\n\n_(📚 위키에 정리했습니다)_',
+      _ => '',
+    };
     final tokensUsed = (result?['tokens_used'] as num?)?.toInt();
     final elapsedMs = (result?['elapsed_ms'] as num?)?.toInt();
-    await _updateMessage(placeholder, reply, tokensUsed: tokensUsed, elapsedMs: elapsedMs);
+    await _updateMessage(placeholder, '$reply$note',
+        tokensUsed: tokensUsed, elapsedMs: elapsedMs);
+    if (routed == 'wiki-query' || routed == 'wiki-ingest') {
+      await _loadWikiPanel();
+    }
   } catch (e) {
     await _updateMessage(placeholder, '오류: $e');
   }
 
   if (_healthPollTimer != null) unawaited(_refreshModelHealth());
+}
+
+// Files staged for the next message. Base64 because the webview cannot pass
+// raw bytes over Tauri IPC.
+final List<Map<String, String>> _pendingAttachments = [];
+
+void _renderAttachBar() {
+  final bar = web.document.getElementById('attachBar')!;
+  if (_pendingAttachments.isEmpty) {
+    bar.classList.add('hidden');
+    bar.innerHTML = ''.toJS;
+    return;
+  }
+  bar.classList.remove('hidden');
+  bar.innerHTML = _pendingAttachments
+      .map((f) =>
+          '<span class="attachChip">📎 ${_escapeHtml(f['name']!)}<button type="button" data-name="${_escapeHtml(f['name']!)}">✕</button></span>')
+      .join()
+      .toJS;
+
+  _forEachElement(bar.querySelectorAll('.attachChip button'), (btn) {
+    final name = btn.getAttribute('data-name')!;
+    void onRemove(web.Event e) {
+      _pendingAttachments.removeWhere((f) => f['name'] == name);
+      _renderAttachBar();
+    }
+
+    btn.addEventListener('click', onRemove.toJS);
+  });
+}
+
+/// Reads each file as base64 via `FileReader`.
+///
+/// A data: URL rather than walking the bytes in Dart -- the encoding happens
+/// in the browser, which matters once a spreadsheet is a few MB and a
+/// per-character loop would lock the UI thread.
+Future<String> _fileToBase64(web.File file) {
+  final done = Completer<String>();
+  final reader = web.FileReader();
+  void onLoad(web.Event e) {
+    final url = (reader.result as JSString?)?.toDart ?? '';
+    // "data:<mime>;base64,<payload>" -- only the payload goes to Rust.
+    final comma = url.indexOf(',');
+    done.complete(comma >= 0 ? url.substring(comma + 1) : '');
+  }
+
+  void onError(web.Event e) => done.complete('');
+  reader.addEventListener('load', onLoad.toJS);
+  reader.addEventListener('error', onError.toJS);
+  reader.readAsDataURL(file);
+  return done.future;
+}
+
+Future<void> _stageAttachments(web.FileList? list) async {
+  if (list == null) return;
+  for (var i = 0; i < list.length; i++) {
+    final file = list.item(i);
+    if (file == null) continue;
+    final data = await _fileToBase64(file);
+    if (data.isEmpty) continue;
+    _pendingAttachments.add({'name': file.name, 'data': data});
+  }
+  _renderAttachBar();
 }

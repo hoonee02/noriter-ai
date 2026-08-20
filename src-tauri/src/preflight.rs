@@ -50,6 +50,19 @@ impl ContextBudget {
     pub fn content_chars(&self) -> usize {
         self.content as usize
     }
+
+    /// Gives back part of the content budget to something else sharing the
+    /// window -- currently the remembered conversation, which rides along
+    /// with a wiki query since 0.1.6.
+    ///
+    /// Without this the two would each size themselves against the full
+    /// window and together overflow it, and an overflow is a silent tail
+    /// truncation: exactly the failure D-04 exists to remove, just moved
+    /// one layer out.
+    pub fn reserving(mut self, chars: usize) -> Self {
+        self.content = self.content.saturating_sub(chars as u32);
+        self
+    }
 }
 
 // Design §8.2.3 also carries `hint_source` on the index, to record how the
@@ -310,6 +323,22 @@ mod tests {
         // Content must never claim the whole window, or the answer itself
         // gets truncated -- the same silent cut-off in a different place.
         assert!(ContextBudget::from_num_ctx(4096).content < 4096);
+    }
+
+    /// 0.1.6: the remembered conversation now shares the window with the
+    /// retrieved pages. If the wiki kept sizing against the full budget the
+    /// two would overflow together, and an overflow truncates the tail
+    /// silently -- the same failure mode D-04 removed, one layer out.
+    #[test]
+    fn history_takes_its_share_out_of_the_content_budget() {
+        let plain = ContextBudget::from_num_ctx(4096);
+        let shared = ContextBudget::from_num_ctx(4096).reserving(1000);
+        assert_eq!(shared.content_chars(), plain.content_chars() - 1000);
+
+        // A history longer than the whole budget must clamp to zero rather
+        // than wrap around into an enormous allowance.
+        let swamped = ContextBudget::from_num_ctx(4096).reserving(999_999);
+        assert_eq!(swamped.content_chars(), 0);
     }
 
     /// The D-04 defect itself: a financial page must not be silently traded

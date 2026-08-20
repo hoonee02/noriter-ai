@@ -62,18 +62,19 @@ impl ConversationMemory {
 #[derive(Default)]
 pub struct MemoryState(Mutex<HashMap<String, ConversationMemory>>);
 
-/// Builds the full message list to send to Ollama for `key`'s next turn:
-/// an optional summary of turns 4-8 back, the last up to 3 turns verbatim,
-/// then the new user message (with `images` attached only to this last
-/// message, never to remembered history).
-pub async fn build_messages(
+/// The remembered conversation, without the message being sent right now.
+///
+/// Split out so paths that compose their own prompt -- the wiki query, which
+/// wraps the question in retrieved context -- can still carry the history.
+/// Before 0.1.6 those paths had their own buttons and standing outside the
+/// conversation made sense; now everything arrives through one chat box, so
+/// a follow-up like "그럼 그 날짜는?" has to still know what "그" refers to.
+pub async fn history_messages(
     app: &AppHandle,
     state: &MemoryState,
     key: &str,
     model: &str,
     num_ctx: u32,
-    new_user_text: &str,
-    images: Option<Vec<String>>,
 ) -> Vec<ChatMessage> {
     let (middle, recent) = {
         let map = state.0.lock().unwrap();
@@ -99,10 +100,25 @@ pub async fn build_messages(
         messages.push(ChatMessage::text("assistant", turn.assistant));
     }
 
+    messages
+}
+
+/// Builds the full message list to send to Ollama for `key`'s next turn:
+/// the remembered history plus the new user message (with `images` attached
+/// only to this last message, never to remembered history).
+pub async fn build_messages(
+    app: &AppHandle,
+    state: &MemoryState,
+    key: &str,
+    model: &str,
+    num_ctx: u32,
+    new_user_text: &str,
+    images: Option<Vec<String>>,
+) -> Vec<ChatMessage> {
+    let mut messages = history_messages(app, state, key, model, num_ctx).await;
     let mut current = ChatMessage::text("user", new_user_text);
     current.images = images;
     messages.push(current);
-
     messages
 }
 

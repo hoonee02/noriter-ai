@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod attachment;
+mod chairman;
 mod config;
 mod dart;
 mod memory;
@@ -87,24 +89,118 @@ struct ChatReply {
     content: String,
     tokens_used: Option<u64>,
     elapsed_ms: u64,
+    /// Which route the chairman picked, so the UI can say what it did with
+    /// the message ("위키에 정리했습니다") instead of leaving the user to
+    /// guess why a reply looks different.
+    routed_as: String,
 }
 
+/// The single entry point for anything the user types.
+///
+/// 0.1.6: the wiki's separate input boxes are gone. The chairman classifies
+/// the message (§2.4) and the matching path runs -- a question against the
+/// wiki, material to file into it, or ordinary conversation. Deciding which
+/// is the agent's job, not something to make the user pick from a UI.
 #[tauri::command]
 async fn ollama_chat(
     app: AppHandle,
     memory: State<'_, MemoryState>,
     personal_memory: State<'_, PersonalMemoryState>,
+    wiki_state: State<'_, WikiState>,
+    draft: State<'_, DraftState>,
     model: String,
     prompt: String,
     num_ctx: u32,
+    files: Option<Vec<attachment::UploadedFile>>,
 ) -> Result<ChatReply, String> {
+    let started = std::time::Instant::now();
+    let files = files.unwrap_or_default();
+
+    // Images go to the model as images; everything else is flattened into
+    // text and appended to the prompt (same rules as the Telegram bridge).
+    let mut images: Vec<String> = Vec::new();
+    let mut attachment_text = String::new();
+    for f in &files {
+        if f.is_image() {
+            images.push(f.data.clone());
+        } else {
+            attachment_text.push_str("\n\n");
+            attachment_text.push_str(&attachment::compose_attachment_text(&f.name, &f.decode()));
+        }
+    }
+
+    let file_names: Vec<String> = files.iter().map(|f| f.name.clone()).collect();
+    let full_prompt = format!("{prompt}{attachment_text}");
+
+    let intent = chairman::decide_intent(&app, &model, num_ctx, &prompt, &file_names).await;
+
+    match intent {
+        chairman::Intent::WikiQuery => {
+            // Company scope comes out of the sentence itself (§8.2.3), so
+            // there is nothing extra for the user to set.
+            let entries = wiki::list(&wiki_state);
+            let scope = preflight::match_known_company(&entries, &prompt).map(|c| c.corp_code);
+            // The wiki path is part of the same conversation now, so it gets
+            // the same remembered turns -- a follow-up like "그 날짜는?" is
+            // meaningless without them.
+            let history =
+                memory::history_messages(&app, &memory, "web", &model, num_ctx).await;
+            let answer = wiki::query(
+                &app,
+                &wiki_state,
+                &draft,
+                &model,
+                num_ctx,
+                &full_prompt,
+                scope.as_deref(),
+                &history,
+            )
+            .await?;
+            // Recorded like any other turn, or the next message would have a
+            // hole where this exchange was.
+            memory::record_turn(&memory, "web", &prompt, &answer);
+            return Ok(ChatReply {
+                content: answer,
+                tokens_used: None,
+                elapsed_ms: started.elapsed().as_millis() as u64,
+                routed_as: "wiki-query".into(),
+            });
+        }
+        chairman::Intent::WikiIngest => {
+            let label = if file_names.is_empty() {
+                "붙여넣은 자료".to_string()
+            } else {
+                file_names.join(", ")
+            };
+            let entry = wiki::ingest(&app, &wiki_state, &model, num_ctx, &full_prompt, &label).await?;
+            let content = format!(
+                "위키에 정리했습니다: **{}**\n\n{}",
+                entry.canonical_title(),
+                entry.summary
+            );
+            // Recorded like any other turn, so a later question can refer
+            // back to what was just filed.
+            memory::record_turn(&memory, "web", &prompt, &content);
+            return Ok(ChatReply {
+                content,
+                tokens_used: None,
+                elapsed_ms: started.elapsed().as_millis() as u64,
+                routed_as: "wiki-ingest".into(),
+            });
+        }
+        chairman::Intent::Chat => {}
+    }
+
     let preview: String = prompt.chars().take(60).collect();
 
     let mut messages = Vec::new();
     if let Some(pm) = personal_memory::context_message(&personal_memory) {
         messages.push(pm);
     }
-    messages.extend(memory::build_messages(&app, &memory, "web", &model, num_ctx, &prompt, None).await);
+    let images_opt = if images.is_empty() { None } else { Some(images) };
+    messages.extend(
+        memory::build_messages(&app, &memory, "web", &model, num_ctx, &full_prompt, images_opt).await,
+    );
 
     let result = queue::call_llm(&app, "web", preview, &model, &messages, num_ctx).await?;
 
@@ -127,6 +223,7 @@ async fn ollama_chat(
         content: result.content,
         tokens_used: result.tokens_used,
         elapsed_ms: result.elapsed_ms,
+        routed_as: "chat".into(),
     })
 }
 
@@ -161,90 +258,15 @@ fn wiki_list(state: State<WikiState>) -> Vec<wiki::WikiEntryView> {
     wiki::list_view(&state)
 }
 
-/// D-05b: `company` is resolved through the DART directory rather than
-/// stored as typed. A free-text company name would scatter one firm's pages
-/// across spelling variants, and the read filter would then hide data while
-/// appearing to work (D-05c). An unresolved name stores no scope at all --
-/// better an unscoped page than one filed under the wrong company.
-#[tauri::command]
-fn wiki_save(
-    state: State<WikiState>,
-    dart_state: State<DartState>,
-    title: String,
-    summary: String,
-    body: String,
-    tags: Vec<String>,
-    company: Option<String>,
-    period: Option<String>,
-    body_required: Option<bool>,
-) -> WikiEntry {
-    let company = company
-        .filter(|c| !c.trim().is_empty())
-        .and_then(|c| dart::lookup(&dart_state, &c));
-
-    wiki::save(
-        &state,
-        wiki::NewPage {
-            title,
-            summary,
-            body,
-            tags,
-            source: "manual".to_string(),
-            // Typed by a person, so it is stated rather than inferred.
-            confidence: wiki::Confidence::Stated,
-            company,
-            period: period.filter(|p| !p.trim().is_empty()),
-            // O-22 leaves it open who sets this automatically (preprocessing
-            // vs Taxonomy); until either exists, the person writing the page
-            // says so.
-            body_required: body_required.unwrap_or(false),
-            ..Default::default()
-        },
-    )
-}
-
-#[tauri::command]
-fn wiki_update(
-    state: State<WikiState>,
-    id: String,
-    title: Option<String>,
-    summary: Option<String>,
-    body: Option<String>,
-    tags: Option<Vec<String>>,
-) -> Result<(), String> {
-    wiki::update(&state, &id, title, summary, body, tags)
-}
+// 0.1.6 removed `wiki_save` and `wiki_ingest` as separate commands: pages are
+// now created only by routing a prompt (`ollama_chat`). Asking the user to
+// type a title, summary, tags, company and period by hand was the agents'
+// work pushed onto the person -- Taxonomy decides the company (§4.1.2),
+// ingest writes the structure, and O-22 assigns `body_required`.
 
 #[tauri::command]
 fn wiki_delete(state: State<WikiState>, id: String) {
     wiki::delete(&state, &id)
-}
-
-#[tauri::command]
-async fn wiki_ingest(
-    app: AppHandle,
-    state: State<'_, WikiState>,
-    model: String,
-    num_ctx: u32,
-    source_text: String,
-    source_label: String,
-) -> Result<WikiEntry, String> {
-    wiki::ingest(&app, &state, &model, num_ctx, &source_text, &source_label).await
-}
-
-/// `scope` is a `corp_code`, not a company name -- resolve it with
-/// `dart_lookup_company` first so one firm's variant spellings converge.
-#[tauri::command]
-async fn wiki_query(
-    app: AppHandle,
-    state: State<'_, WikiState>,
-    draft: State<'_, DraftState>,
-    model: String,
-    num_ctx: u32,
-    question: String,
-    scope: Option<String>,
-) -> Result<String, String> {
-    wiki::query(&app, &state, &draft, &model, num_ctx, &question, scope.as_deref()).await
 }
 
 /// D-03: unpromoted answers, for the review UI. Kept separate from
@@ -274,9 +296,12 @@ async fn wiki_lint(
     state: State<'_, WikiState>,
     model: String,
     num_ctx: u32,
-    scope: Option<String>,
 ) -> Result<String, String> {
-    wiki::lint(&app, &state, &model, num_ctx, scope.as_deref()).await
+    // Lint is deliberately unscoped: it looks for contradictions *across* the
+    // wiki, which is exactly the comparison a company filter would prevent.
+    // Each line carries its company so the model can still tell two firms'
+    // figures apart (D-14).
+    wiki::lint(&app, &state, &model, num_ctx, None).await
 }
 
 #[tauri::command]
@@ -330,11 +355,7 @@ fn main() {
             personal_memory_update,
             personal_memory_delete,
             wiki_list,
-            wiki_save,
-            wiki_update,
             wiki_delete,
-            wiki_ingest,
-            wiki_query,
             wiki_lint,
             wiki_log_tail,
             wiki_draft_list,
